@@ -1,0 +1,1812 @@
+<!doctype html>
+<html>
+<head>  
+    <title>Controller</title> 
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=0, minimum-scale=1.0, maximum-scale=1.0">
+    
+
+    <link href="/timer/assets/css/jquery-ui.css"           type="text/css" rel="stylesheet"> 
+    <link href="/timer/assets/css/style.css"               type="text/css" media="all" rel="stylesheet">
+    <link href="/timer/assets/css/font-awesome.min.css"    type="text/css" media="all" rel="stylesheet">
+
+    <script src="/socket.io/socket.io.js"                       type="application/javascript"></script>
+    <script src="/timer/assets/js/jquery2.1.1.min.js"      type="application/javascript"></script>
+    <script src="/timer/assets/js/jquery-ui.js"            type="application/javascript"></script>
+    <script src="/timer/assets/js/jscolor.js"              type="application/javascript"></script>
+    <script src="/timer/assets/js/jquery.scrollTo.js"      type="application/javascript"></script>
+    <script src="/timer/assets/js/jquery.boxfit.js"        type="application/javascript"></script>
+    <script src="/timer/assets/js/JQuery.mobile.js"        type="application/javascript"></script>
+    
+    <script src="/timer/assets/js/functions.js"></script>
+
+<script>
+    var codeInputed = "";           // the code that the user inputs to enable the control screen
+    var thisTimer = {}              // an object that holds the data for this timer
+    var controllerScreenId = "";    // the id of this controller, used by the server to ascertain what timer it's controlling
+    var timerScreenId = "";         // the timer that this controller controls
+    var timerRunningInterval;       // an interval that will be defined when the timer is counting down
+    var timerRunningIntervalFlag = false;  
+    var offlineInterval;            // interval used when the websocket disconnects, to update the display with dots
+    var offlineIntervalRunning = false;
+    var offlineIntervalCounter = 0;
+    var timeFlashIntervals = [];
+    var pageBgImageData = '';
+    var buttonFlashIntervals = [];
+    
+    // Restricts input for the set of matched elements to the given inputFilter function.
+    (function($) {
+        
+      $.fn.inputFilter = function(inputFilter) {
+        return this.on("input keydown keyup mousedown mouseup select contextmenu drop", function() {
+          if (inputFilter(this.value)) {
+            this.oldValue = this.value;
+            this.oldSelectionStart = this.selectionStart;
+            this.oldSelectionEnd = this.selectionEnd;
+          } else if (this.hasOwnProperty("oldValue")) {
+            this.value = this.oldValue;
+            this.setSelectionRange(this.oldSelectionStart, this.oldSelectionEnd);
+          } else {
+            this.value = "";
+          }
+        });
+      };
+    }(jQuery));
+    
+
+    function ApplyLineBreaks(strTextAreaId) {
+        var oTextarea = document.getElementById(strTextAreaId);
+    if (oTextarea.wrap) {
+        oTextarea.setAttribute("wrap", "off");
+    }
+    else {
+        oTextarea.setAttribute("wrap", "off");
+        var newArea = oTextarea.cloneNode(true);
+        newArea.value = oTextarea.value;
+        oTextarea.parentNode.replaceChild(newArea, oTextarea);
+        oTextarea = newArea;
+    }
+
+    var strRawValue = oTextarea.value;
+    oTextarea.value = "";
+    var nEmptyWidth = oTextarea.scrollWidth;
+    var nLastWrappingIndex = -1;
+
+    function testBreak(strTest) {
+        oTextarea.value = strTest;
+        return oTextarea.scrollWidth > nEmptyWidth;
+    }
+    function findNextBreakLength(strSource, nLeft, nRight) {
+        var nCurrent;
+        if(typeof(nLeft) == 'undefined') {
+            nLeft = 0;
+            nRight = -1;
+            nCurrent = 64;
+        }
+        else {
+            if (nRight == -1)
+                nCurrent = nLeft * 2;
+            else if (nRight - nLeft <= 1)
+                return Math.max(2, nRight);
+            else
+                nCurrent = nLeft + (nRight - nLeft) / 2;
+        }
+        var strTest = strSource.substr(0, nCurrent);
+        var bLonger = testBreak(strTest);
+        if(bLonger)
+            nRight = nCurrent;
+        else
+        {
+            if(nCurrent >= strSource.length)
+                return null;
+            nLeft = nCurrent;
+        }
+        return findNextBreakLength(strSource, nLeft, nRight);
+    }
+
+    var i = 0, j;
+    var strNewValue = "";
+    while (i < strRawValue.length) {
+        var breakOffset = findNextBreakLength(strRawValue.substr(i));
+        if (breakOffset === null) {
+            strNewValue += strRawValue.substr(i);
+            break;
+        }
+        nLastWrappingIndex = -1;
+        var nLineLength = breakOffset - 1;
+        for (j = nLineLength - 1; j >= 0; j--) {
+            var curChar = strRawValue.charAt(i + j);
+            if (curChar == ' ' || curChar == '-' || curChar == '+') {
+                nLineLength = j + 1;
+                break;
+            }
+        }
+        strNewValue += strRawValue.substr(i, nLineLength) + "\n";
+        i += nLineLength;
+    }
+    oTextarea.value = strNewValue;
+    oTextarea.setAttribute("wrap", "");
+    return oTextarea.value.replace(new RegExp("\\n", "g"), "<br />");
+}
+
+
+    function controllerSettingsUpdate(mySocket, updateTimerScreens) { // updateTimerScreens = bool true/false
+        console.log('controllerSettingsUpdate');
+        mySocket.emit('controllerSettingsUpdate', {
+            "controllerScreenId":   controllerScreenId,
+            "timer":                thisTimer,
+            "updateTimerScreens":   updateTimerScreens
+        }); 
+    }
+    
+
+
+
+    
+    function toggleStartStop(activeButton) {
+        console.log('toggleStartStop');
+        switch (activeButton) {
+            case "stop":
+                $("#timeStartButton").hide();
+                $("#timeStopButton").show();
+                break;
+            case "start":
+                $("#timeStartButton").show();
+                $("#timeStopButton").hide();
+                break;
+        }
+    }
+
+    function toggleRunningCued(activeButton) {
+        console.log('toggleRunningCued');
+        timerIndex = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+        switch (activeButton) {
+            case "running":
+                $("#timerCuedDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'none');
+                $("#timerRunningDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'inline-block'); 
+                break;
+            case "cued":
+                $("#timerCuedDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'inline-block');
+                $("#timerRunningDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'none'); 
+                break;
+            case "none":
+                $("#timerCuedDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'none');
+                $("#timerRunningDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'none'); 
+                break;
+        }
+    }
+
+
+
+    function startTimer() {
+        console.log('startTimer');
+
+        // set current timer running to true
+        thisTimer.currentTimerRunning = true;
+
+        timerIndex = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+
+        // calculate epoch from either jogged time (thisTimer.timers[thisTimer.currentTimer].startSeconds) or endTime (thisTimer.timers[thisTimer.currentTimer].endTime)
+        if (thisTimer.timers[timerIndex].endTime) {
+            var endDate = new Date();
+            var endTimeExploded = thisTimer.timers[timerIndex].endTime.split(":");
+            endDate.setHours(endTimeExploded[0]);
+            endDate.setMinutes(endTimeExploded[1]);
+            endDate.setSeconds(endTimeExploded[2]);
+            var endTimeEpoch = endDate.getTime();
+        }
+        else {
+            var now = new Date();
+            var nowEpoch = now.getTime();
+            if (thisTimer.timers[timerIndex].remainingSeconds) {
+                var endTimeEpoch = nowEpoch + (thisTimer.timers[timerIndex].remainingSeconds * 1000);
+                thisTimer.timers[timerIndex].remainingSeconds = null;
+            }
+            else {
+                var endTimeEpoch = nowEpoch + (thisTimer.timers[timerIndex].startSeconds * 1000);
+            }
+
+        }
+
+        // write epoch to the actual end time for this running timer (thisTimer.timerRunningEndTime)
+        thisTimer.timerRunningEndTime = endTimeEpoch;
+
+
+        // start a setInterval to start count down
+        if (!timerRunningIntervalFlag){
+                timerRunningIntervalFlag = true;
+                timerRunningInterval = setInterval(function() {
+                    var now = new Date();
+                    var nowEpoch = now.getTime(); 
+                    var remainingTime = Math.floor((thisTimer.timerRunningEndTime - nowEpoch) / 1000);
+                    adjustTimerTime(thisTimer.currentTimer, remainingTime, "timeStartButton");
+                    if (thisTimer.autoPlay && remainingTime == 0) {
+                        if (timerIndex < thisTimer.timers.length - 1) {
+                            stopTimer("");
+                            nextButtonClicked();
+                            startTimer();
+                        }
+                        else {
+                            if (thisTimer.autoPlayLastStop) {
+                                stopTimer("formatTime");
+                            }
+                        }
+                    }
+            },1000);
+        }
+
+        // change start button to stop button
+        toggleStartStop("stop");
+
+        // change this timers status div to "RUNNING"
+        toggleRunningCued("running");
+                
+        // update the state array to the server                                                                          
+        controllerSettingsUpdate(socket,true);
+    }
+
+    function stopTimer(fromWhere) {
+        console.log('stopTimer');
+        // console.log("stopTimer",fromWhere)
+        timerIndex = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+        thisTimer.currentTimerRunning = false;
+
+        // set remaining seconds so that we can restart timer from there
+        var now = new Date();
+        var nowEpoch = now.getTime();
+        if (thisTimer.timers[timerIndex].endTime == "") {
+            thisTimer.timers[timerIndex].remainingSeconds =  Math.floor((thisTimer.timerRunningEndTime - nowEpoch)/1000);
+        }
+        thisTimer.timerRunningEndTime = null;
+
+        if (timerRunningIntervalFlag) { 
+            clearInterval(timerRunningInterval);
+            timerRunningIntervalFlag = false;  
+            //timeFlashIntervalController("timerLessZeroFlashTimerScreen","","clear","#timerScreenWrapper","stopTimer","");
+            timeFlashIntervalController("timerLessZeroFlashControlScreen","","clear",".timerTime","stopTimer","");
+         }
+
+        
+        
+
+        $("#timerCuedDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'inline-block');
+        $("#timerRunningDiv-" + thisTimer.timers[timerIndex].timerId).css('display', 'none');
+        $("#timeStartButton").show();
+        $("#timeStopButton").hide();
+        //$("#timerTime-"+thisTimer.currentTimer).css("color",thisTimer.timerMainColor);
+        //$("#timerTime-"+thisTimer.currentTimer).css("background","transparent");
+        if (thisTimer.timers[timerIndex].endTime != ""){
+            adjustTimerTime(thisTimer.currentTimer, "", "timeStopButton");
+        } 
+             
+        // update the state array to the server                                                                       
+        controllerSettingsUpdate(socket,true);
+    }
+
+    function nextButtonClicked() {
+        console.log('nextButtonClicked');
+        var index = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+        if (timerRunningIntervalFlag) { 
+            stopTimer("timeNextButton");
+        }
+        //thisTimer.timers[index].remainingSeconds = null;
+        $("#timerDiv-"+thisTimer.currentTimer).removeClass("currentTimer");
+        toggleRunningCued("none");
+        if (thisTimer.timers[index].remainingSeconds !== null) {
+            $("#timerTime-"+thisTimer.currentTimer).text(formatTime(thisTimer.timers[index].remainingSeconds,thisTimer.currentTimer,'nextButtonClicked'));
+        }
+        else {
+            $("#timerTime-"+thisTimer.currentTimer).text(formatTime(thisTimer.timers[index].startSeconds,thisTimer.currentTimer,'nextButtonClicked'));
+        }
+        
+        
+        if (thisTimer.timers[index].endTime != "") {
+            $("#timerTime-"+thisTimer.currentTimer).text("00:00");
+        }
+
+        thisTimer.currentTimer = thisTimer.timers[index + 1].timerId;
+        
+        $("#timerDiv-"+thisTimer.currentTimer).addClass("currentTimer");
+        toggleRunningCued("cued");
+        $("#timers").scrollTo("#timerHeader-"+thisTimer.currentTimer,600,{easing: 'easeInOutSine'});
+        disableEnableStartButton();
+        updateNextPrevButtons();
+        if (thisTimer.autoPlay){
+            startTimer();
+        }
+            
+        // update the state array to the server
+        controllerSettingsUpdate(socket,true); 
+    }
+
+    function disableEnableStartButton() {
+        console.log('disableEnableStartButton');
+        
+        if (thisTimer.timers.length != 0) {
+            var index = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+            if (thisTimer.timers[index].endTime || thisTimer.timerRunningEndTime || thisTimer.timers[index].startSeconds) {
+                $("#timeStartButton").prop('disabled', false);  
+            }
+            else {
+                $("#timeStartButton").prop('disabled', true);  
+            }
+        }
+        else {
+            $("#timeStartButton").prop('disabled', true);  
+        }
+    }
+
+    function updateNextPrevButtons() {
+        console.log('updateNextPrevButtons');
+
+        // we need to find the array index of the timer with the timerId of currentTimer
+        var index = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+
+        // if it is the first timer in the array, disable the prev button
+        if (index > 0){
+            $("#timePrevButton").prop("disabled", false);
+        }
+        else { // if it isn't the first timer in the array, enable the prev button
+            $("#timePrevButton").prop("disabled", true);
+        }
+        
+        // if it isn't the last timer in the array, enable the next button
+        if (index < thisTimer.timers.length - 1) {
+            $("#timeNextButton").prop("disabled", false);
+        }
+        else { // if it is the last timer in the array, disbale the next button.
+            $("#timeNextButton").prop("disabled", true);
+        }
+
+
+    }
+
+    function adjustTimerTime(timerId, value, inputChanged) {
+        
+
+        // we need to find the array index of the timer with the timerId of timerId
+        timerIndex = thisTimer.timers.findIndex(p => p.timerId == timerId);
+        
+        //console.log("timerId: " +timerId+ " | value: " +value+ " | inputChanged: " +inputChanged);
+        switch (inputChanged) {
+            case "timerJogButton": //value = integer , seconds, will be negative if time needs to be subtracted
+                console.log('timerJogButton');
+                if (thisTimer.timers[timerIndex].timerJogButton) { // we are counting up
+                    value = Math.floor(value);
+                }
+                else { // we are counting down
+                    value = -Math.floor(value);
+                }
+
+                // if endTime is set, we want to change that instead of automatically adding to timer minutes:seconds display 
+                if (thisTimer.timers[timerIndex].endTime != "") {
+                    
+                    // convert current endTime to epoch
+                    var endDate = new Date();
+                    var endTimeExploded = thisTimer.timers[timerIndex].endTime.split(":");
+                    endDate.setHours(endTimeExploded[0]);
+                    endDate.setMinutes(endTimeExploded[1]);
+                    endDate.setSeconds(endTimeExploded[2]);
+                    var endTimeEpoch = endDate.getTime();
+
+                    // add the jog value (x1000 to convert to milliseconds) to current endTime epoch
+                    endTimeEpoch = endTimeEpoch + (value * 1000);
+
+                    // convert new endTime epoch back to hh:mm (and add a leading zero if H or M less than 10)
+                    var newDate = new Date(endTimeEpoch);
+                    var hours = newDate.getHours();
+                    hours = ("0" + hours).slice(-2);  
+                    var minutes = newDate.getMinutes();
+                    minutes = ("0" + minutes).slice(-2);
+                    var seconds = newDate.getSeconds();
+                    seconds = ("0" + seconds).slice(-2); 
+                    var newEndTime = hours + ":" + minutes + ":" + seconds;
+
+                    // set the html5 time input value to new endTime hh:mm
+                    $("#timerEndTimeInput-" + timerId).val(newEndTime);
+
+                    // save the new endTime to thisTimer
+                    thisTimer.timers[timerIndex].endTime = newEndTime;
+
+                    // if this timer is already running, then we will add/subtract to timer minutes:seconds display and add to timerRunningEndTime
+                    if (thisTimer.currentTimer == timerId && thisTimer.currentTimerRunning) {
+                        thisTimer.timerRunningEndTime = endTimeEpoch;
+                        /*
+                        var now = new Date();
+                        var nowEpoch = now.getTime();
+                        $("#timerTime-"+timerId).text(formatTime((endTimeEpoch - nowEpoch)/1000)); 
+                        */
+                    }
+                    
+                
+            // update the state array to the server
+                    controllerSettingsUpdate(socket,true);
+                    
+                }
+                else { // if endTime isn't set, we'll just add seconds to timer minutes:seconds display and timerRunningEndTime
+
+                    // if this is the current timer and it isn't currently running
+                    if ((timerId == thisTimer.currentTimer && !thisTimer.currentTimerRunning) ) {
+                        if (thisTimer.timers[timerIndex].remainingSeconds) {
+                            thisTimer.timers[timerIndex].remainingSeconds = thisTimer.timers[timerIndex].remainingSeconds + value; 
+                            $("#timerTime-"+timerId).text(formatTime(thisTimer.timers[timerIndex].remainingSeconds,timerId,'adjustTimerTime')); 
+                        }
+                        else {
+                            thisTimer.timers[timerIndex].startSeconds = thisTimer.timers[timerIndex].startSeconds + value; 
+                            $("#timerTime-"+timerId).text(formatTime(thisTimer.timers[timerIndex].startSeconds,timerId,'adjustTimerTime')); 
+                        }
+                         
+                    } 
+
+                    // If this is the current timer and it is running
+                    if (thisTimer.currentTimerRunning && thisTimer.currentTimer == timerId) {     
+                        thisTimer.timers[timerIndex].remainingSeconds = thisTimer.timers[timerIndex].remainingSeconds + value; 
+                        thisTimer.timerRunningEndTime = thisTimer.timerRunningEndTime + (value * 1000);
+                    }
+
+                    // it isn't the current timer so won't be running,
+                    if (timerId != thisTimer.currentTimer) {
+                        thisTimer.timers[timerIndex].startSeconds = thisTimer.timers[timerIndex].startSeconds + value;
+                        $("#timerTime-"+timerId).text(formatTime(thisTimer.timers[timerIndex].startSeconds,timerId,'adjustTimerTime')); 
+                    }
+                
+                    // update the state array to the server
+                    controllerSettingsUpdate(socket,true);
+                } 
+                disableEnableStartButton();
+                break;
+            case "timerEndTimeInput": // value = string "hh:mm:ss"
+
+                // fix for safari, doesnt do seconds... (since changed the whole thing to hh:mm, still need to do this as it will fail if seconds not included)
+                var valueExp = value.split(":");
+                if (valueExp.length == 2){
+                    value = valueExp[0]+":"+valueExp[1]+":00";
+                }
+        
+                thisTimer.timers[timerIndex].endTime = value;
+                $("#timerEndTimeButton-" + timerId).prop("disabled", false); 
+                // convert value to epoch
+                var endDate = new Date();
+                var endTimeExploded = value.split(":");
+                endDate.setHours(endTimeExploded[0]);
+                endDate.setMinutes(endTimeExploded[1]);
+                endDate.setSeconds(endTimeExploded[2]);
+                var endTimeEpoch = endDate.getTime();
+
+                // if this is the currently running timer and it's already using an endTime, just add to it, don't stop it. This uses epoch
+                if (thisTimer.currentTimerRunning && thisTimer.currentTimer == timerId) {
+                    thisTimer.timerRunningEndTime = endTimeEpoch;
+                } 
+                
+                
+
+
+                // the following variables are not used when using an end time, so set them to zero
+                thisTimer.timers[timerIndex].startSeconds = null;
+                //thisTimer.timers[timerIndex].remainingSeconds = null;
+
+                $("#timerTime-"+timerId).text("");
+                // check the the time selected isn't after the startTime of the next timer
+
+                    // if it is, change the startTime of the next timer
+
+                    
+                
+                // update the state array to the server
+                controllerSettingsUpdate(socket,true);
+                disableEnableStartButton();
+                break;
+            case "timerEndTimeButton": // value = "" , user has deleted the end time
+                $("#timerTime-"+timerId).text("00:00"); 
+                
+                // disable the button
+                $("#timerEndTimeButton-" + timerId).prop("disabled", true);
+
+                // reset the minutes:seconds display to nothing
+                $("#timerEndTimeInput-" + timerId).val('');
+
+                // set the endTime in the state array to zero
+                thisTimer.timers[timerIndex].endTime = "";
+
+                
+                if (thisTimer.currentTimer == timerId) { 
+                    $("#timerCuedDiv-" + timerId).css('display', 'inline-block');
+                    $("#timerRunningDiv-" + timerId).css('display', 'none');
+                    stopTimer("adjustTimerTime timerEndButton");
+                }
+                
+                // update the state array to the server
+                controllerSettingsUpdate(socket,true);
+                disableEnableStartButton();
+                break;
+            case "timeStartButton": // value = integer , seconds
+                $("#timerTime-"+timerId).text(formatTime(value,timerId,'adjustTimerTime'));
+                break;
+            case "timeStopButton": // value = ""
+                //$("#timerTime-"+timerId).text("");
+                break;
+            case "timeResetButton": // value = ""
+
+                // if this is the current timer, stop it from running (clearInterval), reset timerRunningEndTime to zero, currentTimerRunning to false  
+                if (thisTimer.currentTimer == timerId){     
+                    stopTimer("adjustTimerTime timeResetButton");
+                    toggleStartStop("start");
+                    toggleRunningCued("cued");
+                }
+
+
+                if (thisTimer.timers[timerIndex].endTime == "") {
+                    // Reset remainingSeconds
+                    thisTimer.timers[timerIndex].remainingSeconds = null;
+                    // reset time display
+                    $("#timerTime-"+timerId).text(formatTime(thisTimer.timers[timerIndex].startSeconds,timerId,'adjustTimerTime') );
+                }
+                else {
+                    // reset time display
+                    $("#timerTime-"+timerId).text("00:00");
+                    // reset timerEndTime            
+                    $("#timerEndTimeButton-" + timerId).prop("disabled", true);
+                    $("#timerEndTimeInput-" + timerId).val('');
+                    thisTimer.timers[timerIndex].endTime = "";
+                }
+
+                
+
+               
+
+
+                
+
+                // delete presenterName
+                thisTimer.timers[timerIndex].presenterName = "";
+                $("#presenterNameInput-" + timerId).val("");
+
+                controllerSettingsUpdate(socket,true);
+                break;
+                disableEnableStartButton();
+
+        }
+        //disableEnableStartButton();  
+    }
+
+
+
+
+    
+
+
+    function addTimer(timerId) {
+        htmlString = `
+        <div class='timerDiv`;
+            if (thisTimer.currentTimer == timerId) { htmlString += ` currentTimer`; }
+            htmlString += `' id='timerDiv-`+timerId+`' >
+            <div class='timerDivLeft'  id='timerDivLeft-`+timerId+`' >
+                <div id="timerCuedDiv-`+timerId+`" class="timerStatusDiv timerCuedDiv"></div>
+                <div id="timerRunningDiv-`+timerId+`" class="timerStatusDiv timerRunningDiv"></div>
+            </div>
+            <div class='timerDivRight'>
+                <div>
+                    <input type="text" class="presenterNameInput text inline-block width80" placeholder="Presenter Name" id="presenterNameInput-`+timerId+`">
+                    <button class='timerDeleteButton small btn floatRight' type='submit' id='timerDeleteButton-`+timerId+`'>X</button>
+                </div>
+                <br>
+                
+                    <div class='width80' style='float: left;'>
+                        <div class="timerTime" id="timerTime-`+timerId+`"></div>
+                        <div>
+                            <div class='endTimeHolder '>   
+                                <input type="time"  id="timerEndTimeInput-`+timerId+`" class="timerEndTimeInput floatRight" step="60" />
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button class='timeResetButton small btn floatRight' type='submit' id='timeResetButton-`+timerId+`'>RST</button>
+                    
+                    
+                
+                <br>
+                <br>
+                <br>
+                <div class='width80 floatLeft' style='background: red;'>
+                    <div class='toggleButtonHolder'>
+                        <button class="timePlusButton teeny btn3" type="submit" id="timePlusButton-`+timerId+`">+</button>
+                        <button class="timeMinusButton teeny btn3 disabled" type="submit" id="timeMinusButton-`+timerId+`">-</button>
+                    </div>
+                    <div class='toggleButtonHolder'>
+                        <button class="timeMButton teeny btn3" type="submit" id="timeMButton-`+timerId+`">M</button>
+                        <button class="timeSButton teeny btn3 disabled" type="submit" id="timeSButton-`+timerId+`">S</button>
+                    </div>
+                
+                    <div style='float: right;'>
+                        <button class='timerJogButton small btn marginLeft5 ' type='submit' id='timerJog-60-`+timerId+`'>1</button>
+                        <button class='timerJogButton small btn marginLeft5 ' type='submit' id='timerJog-300-`+timerId+`'>5</button>
+                        <button class='timerJogButton small btn marginLeft5 ' type='submit' id='timerJog-600-`+timerId+`'>10</button>
+                        <button class='timerJogButton small btn marginLeft5 x' type='submit' id='timerJog-1800-`+timerId+`'>30</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+        $("#timers").append(htmlString);
+        //thisTimer.timers.push({"timerId": timerId, "presenterName": "", "startSeconds": 0, "startTime": "", "endTime": "", "timerJogButton": true });
+        if (thisTimer.currentTimer == timerId) { 
+            $("#timerCuedDiv-" + timerId).css('display','inline-block');
+        }
+    }
+
+// ******************************************************************************************************************************************************************************** SOCKET CONTROL
+
+    var socket = io.connect({
+        reconnection:           true,
+        reconnectionDelay:      1000,
+        reconnectionDelayMax:   5000,
+        reconnectionAttempts:   Infinity
+    });
+
+    $(function () {
+
+        socket.on('connect', function(reason){
+            socket.emit('newConnection', {'clientType': 'controllerScreen', "oldScreenId": getUrlVars()["controllerCode"], "newSocketId": socket.id}); 
+
+            if (offlineIntervalRunning) {
+                clearInterval(offlineInterval);
+                offlineIntervalRunning = false;
+            }     
+        });   
+
+
+
+
+        socket.on('disconnect', function(reason){
+            $('#offline-div').show();
+            $('#offline-div-content').show();
+            if (reason === 'io server disconnect') {
+                socket.connect();
+            }
+            $("#loadingDots").html('.');
+            if (!offlineIntervalRunning) {
+                offlineInterval = setInterval(function(){
+                    $("#loadingDots").append('.');
+                    offlineIntervalCounter++;
+                    if (offlineIntervalCounter > 10) { offlineIntervalCounter = 0;  $("#loadingDots").html('.'); }
+                },1000); 
+            } 
+
+            $("#monitorModal").hide();
+            $("#messageModal").hide();
+            $("#myModal").hide(); 
+        });
+
+
+
+
+        
+        socket.on('modalRefreshButton', function(msg){
+            
+            console.log('modalRefreshButton',msg);
+            window.location.reload();
+        });
+        
+        socket.on('bing', function(msg) {
+            socket.emit('bong',{"bongBy": "controllerScreenId: "+controllerScreenId});
+            var dt = new Date();
+            var tTime = dt.getHours() + ":" + dt.getMinutes() + ":" + dt.getSeconds();       
+            //console.log("bong: "+ tTime);
+        });
+
+        socket.on('QRCodeRequestResponse', function(msg){ // timerScreenQR (URL)
+
+            console.log('QRCodeRequestResponse',msg);
+            
+            
+            
+            QRBgImageBase64Data = msg['timerScreenQR'];
+            $('#QRTextDiv').html('Scan the QR code or enter the code '+msg.timerScreenId+' at http://54.66.111.53:3000/timer/timerControl.html ');
+            $('#QRDiv').css({'background-image': 'url("'+QRBgImageBase64Data+'")'});
+            $('#QRDiv').css('background-size','cover');
+            $("#QRModal").show();
+        });
+
+        socket.on('newControllerScreenId', function(msg){ // newControllerScreenId
+            
+            
+            // alert('newControllerScreenId',msg);
+            controllerScreenId = msg['newControllerScreenId'].toString();
+
+            // this is incase they scan the QR code.
+            codeInputed = getUrlVars()["timerCode"];
+            if (codeInputed) {
+                socket.emit('timerScreenCodeInputed', {"controllerScreenId": controllerScreenId, "inputedCode": codeInputed});
+                //alert('codeInputed',codeInputed);
+            }
+            
+            if (history.pushState) {
+                var newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?controllerCode='+controllerScreenId;
+                window.history.pushState({path:newurl},'',newurl);
+            }
+            $("#controllerScreenId").text("ID: " + controllerScreenId);
+            $("#timer-screen-code-input").val('');
+            
+            $("#messageModalTextarea").val('');
+            $("#code-input-div").show();
+            $('#offline-div').hide();
+            $('#offline-div-content').hide();
+
+            $("#monitorModal").hide();
+            $("#messageModal").hide();
+            $("#myModal").hide();
+            buttonFlashIntervalController("messageButton", 500, "clear", "#messageButton", "newControllerScreenId");
+
+            // delete any data stored in thisTimer object
+            thisTimer = {}
+            if (timerRunningIntervalFlag) {
+                clearInterval(timerRunningInterval);  
+                //timeFlashIntervalController("timerLessZeroFlashTimerScreen","","clear","#timerScreenWrapper","stopTimer","");
+                timeFlashIntervalController("timerLessZeroFlashControlScreen","","clear",".timerTime","stopTimer","");
+                toggleStartStop("start");
+            }
+        }); 
+        socket.on('bgImageReceived', function(msg){
+            console.log('bgImageReceived','image data');
+                $('body').css('background-image', 'url("'+msg.data+'")');
+                $('body').css("background-size", "cover");
+                $('body').css("background-repeat", "no-repeat");
+                $('body').css("background-attachment", "fixed");
+                $('body').css("background-position", "center center");
+                pageBgImageData = msg.data;
+        });
+        socket.on('monitorScreensUpdate', function(msg){  // monitorScreenIds [xxxxx,xxxxx,xxxxx]
+            thisTimer.monitorScreens = msg.monitorScreenIds;
+        });
+        socket.on('codeInputed', function(msg){ // timerScreenId, data, oldConnection, from
+            console.log('codeInputed',msg);
+            $('#offline-div').hide();
+            $('#offline-div-content').hide();
+            $("#code-input-div").hide();
+            timerScreenId = msg.timerScreenId;
+            $("#timerIdHolderCode").text(timerScreenId);
+            thisTimer = {}
+            thisTimer = msg.data;
+            $('#timerNameChange').val(thisTimer.timerName);
+            controllerScreenId = getUrlVars()["controllerCode"];
+            console.log('thisTimer',thisTimer);
+
+            $('#timerNameX').val(thisTimer.timerNameX);
+            $('#timerNameY').val(thisTimer.timerNameY);
+            $('#timerNameSize').val(thisTimer.timerNameSize);
+            $('#timerX').val(thisTimer.timerX);
+            $('#timerY').val(thisTimer.timerY);
+            $('#timerSize').val(thisTimer.timerSize);
+            $('#presenterNameX').val(thisTimer.presenterNameX);
+            $('#presenterNameY').val(thisTimer.presenterNameY);
+            $('#presenterNameSize').val(thisTimer.presenterNameSize);
+            $('body').css({'background':thisTimer.pageBgColor});
+           
+
+            timerMainColorChangePicker.fromString(thisTimer.timerMainColor);
+            timerFirstIntervalColorChangePicker.fromString(thisTimer.timerFirstIntervalColor);
+            timerSecondIntervalColorChangePicker.fromString(thisTimer.timerSecondIntervalColor);
+            timerLessZeroBgColorChangePicker.fromString(thisTimer.timerLessZeroBgColor);
+            timerLessZeroFgColorChangePicker.fromString(thisTimer.timerLessZeroFgColor);
+            pageBgColorChangePicker.fromString(thisTimer.pageBgColor);
+            if (thisTimer.pageBgImage) {
+                socket.emit('getBgImage',{"screenType": "controllerScreen","screenId":controllerScreenId});
+            }
+            
+            if (thisTimer.autoPlay){
+                $("#timerAutoPlay").removeClass("disabled");
+            }
+            if (thisTimer.autoPlayLastStop){
+                $("#timerAutoPlayLastStop").removeClass("disabled");
+            }
+            if (thisTimer.timerLessZeroFlash){
+                $("#timerLessZeroFlash").removeClass("disabled");
+            }
+            if (thisTimer.timerFirstIntervalFlash){
+                $("#timerFirstIntervalFlash").removeClass("disabled");
+            }
+            if (thisTimer.timerSecondIntervalFlash){
+                $("#timerSecondIntervalFlash").removeClass("disabled");
+            }
+        /*
+        var 
+        var timerSecondIntervalColorChangePicker.fromString();
+        var timerLessZeroBgColorChangePicker.fromString();
+        var timerLessZeroFgColorChangePicker.fromString();
+        var pageBgColorChangePicker.fromString();
+
+        */
+            //console.log(thisTimer);
+            
+            // If controller screen has lost connection and refreshed, we need to transfer the settings from "msg.data" (thisTimer) to this UI screen
+    
+            // "timers":                   [{"timerId": 0, "presenterName": "", "seconds": 0, "startSeconds": 0, "startTime": 0, "endTime": 0, "timerJogButton": true }],
+            // Loop through timers
+
+    
+        //if (!msg.oldConnection) {
+            $("#timers").empty();
+            thisTimer.timers.forEach(function (item, index) {
+
+                // add the timer html code to the page
+                addTimer(item.timerId);
+
+
+                // if this is the current timer, add the current timer highlight
+                if (thisTimer.currentTimer == item.timerId){
+                    $("#timerDiv-"+item.timerId).addClass("currentTimer");
+
+                    // if this timer is running, add the running icon, otherwise add the cued icon
+                    if (thisTimer.currentTimerRunning) {
+                        toggleRunningCued("running");
+                        var now = new Date();
+                        var nowEpoch = now.getTime();
+                        $("#timerTime-" + item.timerId).text(formatTime(Math.floor((thisTimer.timerRunningEndTime - nowEpoch)/1000)),item.timerId,'codeInputed'); 
+                    } else {
+                        toggleRunningCued("cued");
+                        if (thisTimer.timers[index].remainingSeconds){
+                            $("#timerTime-" + item.timerId).text(formatTime(thisTimer.timers[index].remainingSeconds,item.timerId,'codeInputed'));
+                        }
+                        else {
+                            $("#timerTime-" + item.timerId).text(formatTime(thisTimer.timers[index].startSeconds,item.timerId,'codeInputed')); 
+                        }
+                    }
+                    
+
+                    if (!thisTimer.timers[timerIndex].endTime) {
+                        thisTimer.timers[timerIndex].remainingSeconds =  Math.floor((thisTimer.timerRunningEndTime - nowEpoch)/1000);
+                    }
+
+                    if (thisTimer.timers[index].remainingSeconds){
+                        
+                    }
+                    
+                }
+
+                // add the presenter name
+                $("#presenterNameInput-" + item.timerId).val(item.presenterName);
+
+                // check the jog +/- button
+                if (!thisTimer.timers[index].timerJogButton){
+                    $("#timePlusButton-"+item.timerId).addClass("disabled");
+                    $("#timeMinusButton-"+item.timerId).removeClass("disabled");
+                }
+
+                // check the minutes seconds buttons
+                if (!thisTimer.timers[index].timerMinuteButton){
+                    $("#timePlusButton-"+item.timerId).addClass("disabled");
+                    $("#timeMinusButton-"+item.timerId).removeClass("disabled");
+                }
+
+                // If this isn't the current active timer, but it's startSeconds is set
+                if (thisTimer.currentTimer != item.timerId) {
+                    if (thisTimer.timers[index].startSeconds){
+                        $("#timerTime-" + item.timerId).text(formatTime(thisTimer.timers[index].startSeconds,item.timerId,'codeInputed'));     
+                    }
+                }
+
+                if (item.endTime){
+                    $("#timerEndTimeInput-" + item.timerId).val(item.endTime);
+                    // calculate epoch end time
+                    var endDate = new Date();
+                    var endTimeExploded = item.endTime.split(":");
+                    endDate.setHours(endTimeExploded[0]);
+                    endDate.setMinutes(endTimeExploded[1]);
+                    endDate.setSeconds(endTimeExploded[2]);
+                    var endTimeEpoch = endDate.getTime();
+                    $("#timerEndTimeButton-" +  item.timerId).prop("disabled", false);
+                }
+
+                if (item.startTime){
+                    $("#timerStartTimeInput-" + item.timerId).val(item.startTime);
+                    // calculate epoch start time
+                    var startDate = new Date();
+                    var startTimeExploded = item.startTime.split(":");
+                    startDate.setHours(startTimeExploded[0]);
+                    startDate.setMinutes(startTimeExploded[1]);
+                    startDate.setSeconds(startTimeExploded[2]);
+                    var startTimeEpoch = startDate.getTime();
+                    $("#timerStartTimeButton-" +  item.timerId).prop("disabled", false); 
+                }
+                if (startTimeEpoch && endTimeEpoch){
+                    $("#timerTime-" + item.timerId).text(formatTime((endTimeEpoch-startTimeEpoch)/1000,item.timerId,'codeInputed'));
+                }
+            });
+        //}
+
+            if (thisTimer.currentTimerRunning){
+                toggleStartStop("stop");
+                toggleRunningCued("running");   
+                startTimer();
+            }
+            else {
+                //this if is here to stop this section firing when no timers are added, such as when page initially loads or refreshes with no timers
+                if (thisTimer.currentTimerRunning !== false){ 
+                    stopTimer("codeInputed");
+                    toggleStartStop("start");
+                    toggleRunningCued("cued");
+                }
+            }
+
+            if (thisTimer.timers.length > 0) {
+                updateNextPrevButtons();
+                disableEnableStartButton();
+            } 
+        });          
+$("#sceneChangeLogo").click(function() {
+    socket.emit('printArrays', "");
+    console.log("thisTimer",thisTimer);
+});
+
+
+        $("#monitorButton").click(function() {
+            
+            
+            $("#monitorModal").show();
+            //console.log(thisTimer);
+            $("#monitorScreenDiv").html(`<iframe  src="http://54.66.111.53:3000/timer/controlMonitor.html?timerCode=`+timerScreenId+`" ></iFrame>`);
+        });
+        
+        
+        /*
+        $(document).on( "swiperight", swipeRightHandler );
+        $(document).on( "swipeleft", swipeLeftHandler );
+            
+           
+        // Callback function references the event target and adds the 'swipeleft' class to it
+        function swipeRightHandler( event ){
+                window.history.go(-2);
+            }
+            function swipeLeftHandler( event ){
+                window.history.go(1);
+            }
+        */
+        $('#timer-screen-code-input').change(function(){
+            // send message to control panel that a code has been input
+            socket.emit('timerScreenCodeInputed', {"controllerScreenId": controllerScreenId, "inputedCode": $(this).val().toString()});
+            $(this).val('');
+        });
+        
+        $('#timerNameChange').change(function(){ //                                                                                                 #timerNameChange  
+            thisTimer.timerName =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+
+        $('#timerNameX').change(function(){ //   
+            thisTimer.timerNameX =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#timerNameY').change(function(){ //   
+            thisTimer.timerNameY =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#timerNameSize').change(function(){ //   
+            thisTimer.timerNameSize =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+                
+        $('#timerX').change(function(){ //   
+            thisTimer.timerX =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#timerY').change(function(){ //   
+            thisTimer.timerY =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#timerSize').change(function(){ //   
+            thisTimer.timerSize =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+                
+        $('#presenterNameX').change(function(){ //   
+            thisTimer.presenterNameX =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#presenterNameY').change(function(){ //  
+            thisTimer.presenterNameY =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+        $('#presenterNameSize').change(function(){ //   
+            thisTimer.presenterNameSize =   $(this).val().toString(); 
+            controllerSettingsUpdate(socket,true);
+        }); 
+
+
+
+
+
+
+
+
+
+
+
+        $('#timerMainColorChange').change(function(){ //                                                                                            #timerMainColorChange  
+            thisTimer.timerMainColor = $(this).val().toString();
+            controllerSettingsUpdate(socket,true);
+        });  
+        
+        $('#timerFirstIntervalTimeChange').change(function(){ //                                                                                    #timerFirstIntervalTimeChange       
+            thisTimer.timerFirstIntervalTime = $(this).val();
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $('#timerFirstIntervalColorChange').change(function(){ //                                                                                   #timerFirstIntervalColorChange
+            thisTimer.timerFirstIntervalColor = $(this).val();
+            controllerSettingsUpdate(socket,true);
+        }); 
+        
+        $('#timerSecondIntervalTimeChange').change(function(){ //                                                                                   #timerSecondIntervalTimeChange
+            thisTimer.timerSecondIntervalTime = $(this).val();
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $('#timerSecondIntervalColorChange').change(function(){ //                                                                                  #timerSecondIntervalColorChange
+            thisTimer.timerSecondIntervalColor = $(this).val();
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        
+        $('#timerLessZeroBgColorChange').change(function(){ //                                                                                      #timerLessZeroBgColorChange
+            thisTimer.timerLessZeroBgColor  = $(this).val();
+            controllerSettingsUpdate(socket,true);
+            
+        });
+        $('#timerLessZeroFgColorChange').change(function(){ //                                                                                     #timerLessZeroBgColorChange
+            thisTimer.timerLessZeroFgColor  = $(this).val();   
+            controllerSettingsUpdate(socket,true);
+        });
+            
+        $('#pageBgColorChange').change(function(){ //                                                                                               #pageBgColorChange
+            thisTimer.pageBgColor = $(this).val(); 
+            $('body').css({'background':thisTimer.pageBgColor});
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $("#timers").on("change", ".presenterNameInput", function(event) { //                                                                       .presenterNameInput
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1]; 
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            thisTimer.timers[index].presenterName = $(this).val(); 
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $("#timers").on("change", ".timerEndTimeInput", function(event) { //                                                                         .timerEndTimeInput
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1]; 
+            adjustTimerTime(id, $(this).val(), "timerEndTimeInput");
+        });
+        
+        $("#timers").on("change", ".timerStartTimeInput", function(event) { //                                                                        .timerStartTimeInput
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1]; 
+            adjustTimerTime(id, $(this).val(), "timerStartTimeInput");
+        });
+
+
+        $("#timers").on("click", ".timePlusButton", function(){ //                                                                                     .timePlusButton
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];  
+            //$("#timePlusButton-"+id).hide();
+            //$("#timeMinusButton-"+id).show();
+            if ($("#timePlusButton-"+id).hasClass("disabled")) {
+                $("#timePlusButton-"+id).toggleClass("disabled");
+                $("#timeMinusButton-"+id).toggleClass("disabled");
+            }
+
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            thisTimer.timers[index].timerJogButton = true; 
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+
+        $("#timers").on("click", ".timerDivLeft", function(){
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];
+            if (thisTimer.currentTimer != id) { 
+                stopTimer();
+                var index = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+                if (timerRunningIntervalFlag) { 
+                    stopTimer("timerDivLeft Click");
+                }
+                thisTimer.timers[index].remainingSeconds = null;
+                $("#timerDiv-"+thisTimer.currentTimer).removeClass("currentTimer");
+                toggleRunningCued("none");
+                if (thisTimer.timers[index].startSeconds > 0) { 
+                    $("#timerTime-"+thisTimer.currentTimer).text(formatTime(thisTimer.timers[index].startSeconds,thisTimer.currentTimer,'click->timerDivLeft'));
+                }
+                if (thisTimer.timers[index].endTime) {
+                    $("#timerTime-"+thisTimer.currentTimer).text("00:00");
+                }
+
+                thisTimer.currentTimer = id;
+                
+                $("#timerDiv-"+thisTimer.currentTimer).addClass("currentTimer");
+                toggleRunningCued("cued");
+                $("#timers").scrollTo("#timerHeader-"+thisTimer.currentTimer,600,{easing: 'easeInOutSine'});
+                disableEnableStartButton();
+                updateNextPrevButtons();
+                
+                if (thisTimer.autoPlay){
+                    startTimer();
+                }
+                
+                // update the state array to the server
+                controllerSettingsUpdate(socket,true); 
+                
+            }
+        });
+
+$("#timers").on("click", ".timeMButton", function(){ //                                                                                     .timePlusButton
+    event.preventDefault();
+    var str = $(this).attr('id').split("-");      
+    var id = str[1];  
+    //$("#timePlusButton-"+id).hide();
+    //$("#timeMinusButton-"+id).show();
+    if ($("#timeMButton-"+id).hasClass("disabled")) {
+        $("#timeMButton-"+id).toggleClass("disabled");
+        $("#timeSButton-"+id).toggleClass("disabled");
+    }
+
+    var index = thisTimer.timers.findIndex(p => p.timerId == id);
+    thisTimer.timers[index].timerMinuteButton = true; 
+        
+    // update the state array to the server
+    controllerSettingsUpdate(socket,true);
+});
+
+$("#timers").on("click", ".timeSButton", function(){ //                                                                                     .timePlusButton
+    event.preventDefault();
+    var str = $(this).attr('id').split("-");      
+    var id = str[1];  
+    //$("#timePlusButton-"+id).hide();
+    //$("#timeMinusButton-"+id).show();
+    if ($("#timeSButton-"+id).hasClass("disabled")) {
+        $("#timeSButton-"+id).toggleClass("disabled");
+        $("#timeMButton-"+id).toggleClass("disabled");
+    }
+
+    var index = thisTimer.timers.findIndex(p => p.timerId == id);
+    thisTimer.timers[index].timerMinuteButton = false; 
+        
+    // update the state array to the server
+    controllerSettingsUpdate(socket,true);
+});
+
+
+        $("#timers").on("click", ".timeMinusButton", function(){ //                                                                                   .timeMinusButton
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1]; 
+            //$("#timePlusButton-"+id).show();
+            //$("#timeMinusButton-"+id).hide();
+
+            if ($("#timeMinusButton-"+id).hasClass("disabled")) {
+                $("#timePlusButton-"+id).toggleClass("disabled");
+                $("#timeMinusButton-"+id).toggleClass("disabled");
+            }
+
+
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            thisTimer.timers[index].timerJogButton = false;
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+
+        
+        
+        $("#timers").on("click", ".timeResetButton", function(){ //                                                                                    .timeResetButton
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            
+            disableEnableStartButton();
+            adjustTimerTime(id, "", "timeResetButton");
+        });
+    
+
+
+        $("#timers").on("click", ".timerEndTimeButton", function(){ //                                                                                  .timerEndTimeButton
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];
+            adjustTimerTime(id, "", "timerEndTimeButton");
+        });
+
+
+
+        
+        
+        
+        
+        
+        
+        $("#timers").on("click", ".timerJogButton", function(){ //                                                                                      .timerJogButton
+            var str = $(this).attr('id').split("-");        
+            var id = parseInt(str[2]);
+            var seconds = parseInt(str[1]);
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            if (!thisTimer.timers[index].timerMinuteButton) {
+                seconds = seconds/60;
+            }
+            adjustTimerTime(id, Math.floor(seconds), "timerJogButton");
+            controllerSettingsUpdate(socket,true); 
+    
+        });
+
+        $("#timers").on("click", ".timerDeleteButton", function(){ //                                                                                  .timerDeleteButton
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];
+            // console.log(id);
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            if (id == thisTimer.currentTimer) {
+                if (thisTimer.currentTimerRunning) {
+                    stopTimer("timerDeleteButton");
+                }
+            }
+            thisTimer.timers.splice(index, 1);
+            if (id == thisTimer.currentTimer) {
+                if (index < thisTimer.timers.length) {
+                    thisTimer.currentTimer = thisTimer.timers[index].timerId;
+                    
+                    $("#timerDiv-"+thisTimer.currentTimer).addClass("currentTimer");
+                    $("#timerCuedDiv-" + thisTimer.currentTimer).css('display', 'inline-block');
+                }
+                else {
+                    if (thisTimer.timers.length > 0) {
+                        thisTimer.currentTimer = thisTimer.timers[index-1].timerId;
+                        $("#timerDiv-"+thisTimer.currentTimer).addClass("currentTimer");
+                        $("#timerCuedDiv-" + thisTimer.currentTimer).css('display', 'inline-block');
+                    }
+                    else {
+                        thisTimer.currentTimer = null;
+                    }
+                }
+            }
+
+            $("#timerDiv-"+id).remove();
+            disableEnableStartButton();
+            updateNextPrevButtons();
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true); 
+        });
+
+        
+        $("#timeNextButton").click(function() { //                                                                                                      #timeNextButton
+            
+            nextButtonClicked();
+           
+        });
+
+        $("#transferControlButton").click(function() {
+            socket.emit("transferControlQRCodeRequest", {"controllerScreenId": controllerScreenId});
+        });
+
+        
+        $("#QRModalCancelButton").click(function(){ //                                                                                           #mesageModalCancelButton
+            $("#QRModal").hide();
+            $("#QRDiv").empty();
+
+        });
+
+
+        
+        $("#timePrevButton").click(function() { //                                                                                                      #timePrevButton
+            var index = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
+            if (timerRunningIntervalFlag) { 
+                stopTimer("timePrevButton");
+            }
+            // thisTimer.timers[index].remainingSeconds = null;
+            $("#timerDiv-"+thisTimer.currentTimer).removeClass("currentTimer"); 
+            toggleRunningCued("none");
+            if (thisTimer.timers[index].remainingSeconds !== null) {
+                $("#timerTime-"+thisTimer.currentTimer).text(formatTime(thisTimer.timers[index].remainingSeconds,thisTimer.currentTimer,'click->timePrevButton'));
+            }
+            else {
+                $("#timerTime-"+thisTimer.currentTimer).text(formatTime(thisTimer.timers[index].startSeconds,thisTimer.currentTimer,'click->timePrevButton'));
+            }
+            
+            if (thisTimer.timers[index].endTime != "") {
+                $("#timerTime-"+thisTimer.currentTimer).text("00:00");
+            }
+            thisTimer.currentTimer = thisTimer.timers[index - 1].timerId;
+            $("#timerDiv-"+thisTimer.currentTimer).addClass("currentTimer");
+            toggleRunningCued("cued");
+            $("#timers").scrollTo("#timerHeader-"+thisTimer.currentTimer,600,{easing: 'easeInOutSine'});
+            disableEnableStartButton();
+            updateNextPrevButtons();
+            
+            
+            if (thisTimer.autoPlay){
+                startTimer();
+            }
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+            
+        });
+        
+        $("#timeStartButton").click(function() { //                                                                                                   #timeStartButton 
+            startTimer();
+        });
+        
+        $("#timeStopButton").click(function() { //                                                                                                    #timeStopButton
+            stopTimer("timeStopButton");
+        });
+        
+        
+        $("#settingsButton").click(function() { //                                                                                                         #settingsButton
+            $("#myModal").show();
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $("#modalCancelButton").click(function() { //                                                                                                     #modalCancelButton
+            $("#myModal").hide();
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        
+        
+        $("#addTimerButton").click(function() { //                                                                                                         #addTimerButton
+            if (thisTimer.timers.length > 0) { // if there are no timers in the array, getting the id of the last timer will fail
+                // sort thisTimer.timers by timers.timerId
+                var tempTimerArray = thisTimer.timers.sort((a, b) => parseFloat(a.timerId) - parseFloat(b.timerId));
+                // get the timerId of the last timer
+                var lastTimerId  = tempTimerArray[tempTimerArray.length - 1].timerId;
+                // add 1 to lastTimerId
+                var nextTimerId = lastTimerId + 1;
+            }
+            else { // if there are no timers in the array, getting the id of the last timer will fail, so force it to zero
+                var nextTimerId = 0;
+                thisTimer.currentTimer = 0;
+            }
+
+            // add the new timer
+            addTimer(nextTimerId);
+            
+            // scroll to the new timer
+            $("#timers").scrollTo("#timerHeader-"+nextTimerId,600,{easing: 'easeInOutSine'});
+
+            // add the new timer object to the state array.timers array
+            thisTimer.timers.push({"timerId": nextTimerId, "presenterName": "", "startSeconds": 0, "remainingSeconds": null, "startTime": "", "endTime": "", "timerJogButton": true, "timerMinuteButton": true });
+            
+            // check the state of the Next/Prev buttons
+            updateNextPrevButtons();
+
+            // check the state of the Start button
+            disableEnableStartButton();
+             
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+
+        $("#bgImageDelete").click(function(){ //                                                                                                         #bgImageDelete
+            thisTimer.pageBgImage = false;
+            pageBgImageData = '';
+            $('body').css('background-image', 'none');
+            socket.emit("bgImageDelete", {"controllerScreenId": controllerScreenId});
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+
+        
+        $("#bgImageUpload").change(function() { //                                                                                                         #bgImageUpload
+            var reader = new FileReader();
+            if (typeof FileReader !== "undefined") {
+                
+                // check file size
+            }
+            reader.onload = function(){
+                var dataURL = reader.result;
+                var size = document.getElementById('bgImageUpload').files[0].size;
+                //console.log("size: "+size);
+                if (size < 751000) {
+                    $('body').css('background-image', 'url("'+dataURL+'")');
+                    $('body').css("background-size", "cover");
+                    $('body').css("background-repeat", "no-repeat");
+                    $('body').css("background-attachment", "fixed");
+                    $('body').css("background-position", "center center");
+                    thisTimer.pageBgImage = true; // dataURL;
+                    pageBgImageData = dataURL;
+
+                // update the state array to the server
+                controllerSettingsUpdate(socket,true);
+                socket.emit("bgImage", {"controllerScreenId": controllerScreenId, "data": dataURL});
+                
+                }
+                else {
+                    alert("File is too big, 750K limit.")
+                }
+            };
+            reader.readAsDataURL(this.files[0]);
+            
+
+        });
+
+
+        $("#messageButton").click(function(){ //                                                                                                         #messageButton
+            if (thisTimer.timerMessageOnScreen) {    
+                thisTimer.timerMessageOnScreen = false;
+                buttonFlashIntervalController("messageButton", null, "clear", "#messageButton", "mesageModalCancelButton"); 
+                $("#messageButton").removeClass('flashButton');
+            }
+            else {
+                $("#messageModal").show();    
+            }   
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $("#mesageModalSendButton").click(function(){  //                                                                                             #mesageModalSendButton
+            $("#messageModal").hide();
+            ApplyLineBreaks('messageModalTextarea'); // 
+            //document.getElementById("pnlPreview").innerHTML = oTextarea.value.replace(new RegExp("\\n", "g"), "<br />");
+            //var message = ApplyLineBreaks('messageModalTextarea');
+            var message = ApplyLineBreaks('messageModalTextarea');
+            console.log(message);
+            
+            if (message != "" ){
+                thisTimer.timerMessageOnScreen = true; 
+                thisTimer.timerMessage = message;
+                //$("#messageModalTextarea").val('');
+                buttonFlashIntervalController("messageButton", 500, "set", "#messageButton", "mesageModalSendButton");
+            }   
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);       
+        });
+        
+        $("#mesageModalCancelButton").click(function(){ //                                                                                           #mesageModalCancelButton
+            $("#messageModal").hide();
+            $("#messageModalTextarea").val('');
+            
+            
+        });
+        $("#monitorModalCancelButton").click(function(){ //                                                                                           #mesageModalCancelButton
+            $("#monitorModal").hide();
+            $("#monitorScreenDiv").empty();
+
+        });
+
+        
+
+        $("#timerSecondIntervalFlash").click(function(){ //                                                                                         #timerSecondIntervalFlash
+            $(this).toggleClass("disabled");
+            if ($("#timerSecondIntervalFlash").hasClass("disabled")) {
+                thisTimer.timerSecondIntervalFlash = false;
+            }
+            else {
+                thisTimer.timerSecondIntervalFlash = true;
+
+            }
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);  
+        });
+
+        $("#timerFirstIntervalFlash").click(function(){ //                                                                                           #timerFirstIntervalFlash
+            $(this).toggleClass("disabled");
+            if ($("#timerFirstIntervalFlash").hasClass("disabled")) {
+                
+                thisTimer.timerFirstIntervalFlash = false;
+            }
+            else {
+                
+                thisTimer.timerFirstIntervalFlash = true;
+            }
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true); 
+            
+        });
+        $("#modalSaveButton").click(function(){ // 
+            //socket.emit("modalSaveButton",{"controllerScreenId": controllerScreenId});
+            function download(strData, strFileName, strMimeType) {
+                var D = document,
+                    A = arguments,
+                    a = D.createElement("a"),
+                    d = A[0],
+                    n = A[1],
+                    t = A[2] || "text/plain";
+
+                //build download link:
+                a.href = "data:" + strMimeType + "charset=utf-8," + escape(strData);
+
+
+                if (window.MSBlobBuilder) { // IE10
+                    var bb = new MSBlobBuilder();
+                    bb.append(strData);
+                    return navigator.msSaveBlob(bb, strFileName);
+                } /* end if(window.MSBlobBuilder) */
+
+
+
+                if ('download' in a) { //FF20, CH19
+                    a.setAttribute("download", n);
+                    a.innerHTML = "downloading...";
+                    D.body.appendChild(a);
+                    setTimeout(function() {
+                        var e = D.createEvent("MouseEvents");
+                        e.initMouseEvent("click", true, false, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+                        a.dispatchEvent(e);
+                        D.body.removeChild(a);
+                    }, 66);
+                    return true;
+                }; /* end if('download' in a) */
+
+
+
+                //do iframe dataURL download: (older W3)
+                var f = D.createElement("iframe");
+                D.body.appendChild(f);
+                f.src = "data:" + (A[2] ? A[2] : "application/octet-stream") + (window.btoa ? ";base64" : "") + "," + (window.btoa ? window.btoa : escape)(strData);
+                setTimeout(function() {
+                    D.body.removeChild(f);
+                }, 333);
+                return true;
+            }
+
+            
+            var tempTimerObject = Object.assign({}, thisTimer);
+            tempTimerObject.pageBgImageData = pageBgImageData;
+            download(JSON.stringify(tempTimerObject), 'timer.txt', 'text/plain');
+
+
+
+
+        });
+        $("#modalLoadButton").click(function(){ // 
+            // socket.emit("modalLoadButton",{"controllerScreenId": controllerScreenId}); 
+        });
+
+$("#timerAutoPlay").click(function(){ //                                                                                                         #timerAutoPlay
+    $(this).toggleClass("disabled");
+    if ($("#timerAutoPlay").hasClass("disabled")) {
+        thisTimer.autoPlay = false;
+    }
+    else {
+        thisTimer.autoPlay = true;
+    }
+    
+    // update the state array to the server
+    controllerSettingsUpdate(socket,true);  
+});
+
+$("#timerMessageFlash").click(function(){ //                                                                                                         #timerAutoPlay
+    $(this).toggleClass("disabled");
+    if ($("#timerMessageFlash").hasClass("disabled")) {
+        thisTimer.timerMessageFlash = false;
+    }
+    else {
+        thisTimer.timerMessageFlash = true;
+    }
+        
+    // update the state array to the server
+    controllerSettingsUpdate(socket,true);
+      
+});
+
+
+
+$("#timerAutoPlayLastStop").click(function(){ //                                                                                                         #timerAutoPlay
+    $(this).toggleClass("disabled");
+    if ($("#timerAutoPlayLastStop").hasClass("disabled")) {
+        thisTimer.autoPlayLastStop = false;
+    }
+    else {
+        thisTimer.autoPlayLastStop = true;
+    }
+        
+    // update the state array to the server
+    controllerSettingsUpdate(socket,true);  
+});
+
+        $("#timerLessZeroFlash").click(function(){ //                                                                                                    #timerLessZeroFlash
+            $(this).toggleClass("disabled");
+            if ($("#timerLessZeroFlash").hasClass("disabled")) {
+
+                
+                thisTimer.timerLessZeroFlash = false;
+            }
+            else {
+                thisTimer.timerLessZeroFlash = true;
+                
+            } 
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
+        
+        $("#modalRefreshButton").click(function(){ //                                                                                                    #modalRefreshButton
+            socket.emit("modalRefreshButton",{"controllerScreenId": controllerScreenId}); 
+        });
+        
+        
+        $("#messageModalTextarea").inputFilter(function(value) { //                                                                                      #messageModalTextarea
+            return /^[0-9a-zA-Z' \r\n:".]*$/i.test(value); 
+        });
+        
+        var timerMainColorChangePicker = new JSColor("#timerMainColorChange");
+        var timerFirstIntervalColorChangePicker = new JSColor("#timerFirstIntervalColorChange");
+        var timerSecondIntervalColorChangePicker = new JSColor("#timerSecondIntervalColorChange");
+        var timerLessZeroBgColorChangePicker = new JSColor("#timerLessZeroBgColorChange");
+        var timerLessZeroFgColorChangePicker = new JSColor("#timerLessZeroFgColorChange");
+        var pageBgColorChangePicker = new JSColor("#pageBgColorChange");
+    });
+    
+    
+
+    
+    
+</script>
+</head>
+<body>
+
+
+<div id='code-input-div'>
+    INPUT TIMER SCREEN CODE<br>
+    <div id='code-div'>
+        <input id='timer-screen-code-input' class='code-input text-input ui-corner-all ui-widget'>
+    </div>
+</div> 
+
+    <div id='offline-div'> </div>
+    <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
+    
+        <div id="block" class="w3lvide-content" >
+            <div class="workinghny-form-grid">
+                <div class="main-hotair">
+                    <div class="content-wthree">
+                        <div id="timers">
+                            
+                        </div>
+                        <br><br><br>
+                        <button class="medium timeStartButton btn marginLeft5" type="submit" id="timeStartButton" disabled>START</button>
+                        <button class="medium timeStopButton btn marginLeft5" type="submit" id="timeStopButton">PAUSE</button> 
+                        <button class="medium timeNextButton btn marginLeft5" type="submit" id="timeNextButton" disabled>NEXT</button>
+                        <button class="medium timePrevButton btn marginLeft5" type="submit" id="timePrevButton" disabled>PREV</button>
+                        <button class="medium backButton btn marginLeft5" type="submit" id="backButton">HOME</button>
+                        <br><br>
+                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="addTimerButton">ADD</button>
+                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="settingsButton">SETTINGS</button>
+                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="messageButton">MESSAGE</button>
+                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="monitorButton">MONITOR</button>
+                        <br><br>
+                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="transferControlButton">TRANSFER</button>
+                        
+                        
+                    </div>   
+                </div>
+            </div>
+        </div>
+    <div id="controllerScreenId"></div><div id="sceneChangeLogo"></div>
+    <div id="myModal" class="modal">
+        <div class="modal-content content-wthree">
+            <table border="0">
+                <tr><td colspan="2"><div id="timerIdHolder">TIMER SCREEN ID:</td><td><div id="timerIdHolderCode"></div></div></td></tr>
+
+                <tr><td colspan="3">TIMER NAME<br><input  id="timerNameChange" class="width100PCT" ></td></tr>
+                <tr><td style='padding: 0;'>X<br><input  id="timerNameX" class="width100PCT" ></td>
+                <td style='padding: 0;'>Y<br><input  id="timerNameY" class="width100PCT" ></td>
+                <td  style='padding: 0;'>SIZE<br><input  id="timerNameSize" class="width100PCT" ></td></tr>
+                
+                <tr><td>TIMER<br>X<br><input  id="timerX" class="width100PCT" ></td>
+                <td ><br>Y<br><input  id="timerY" class="width100PCT" ></td>
+                <td ><br>SIZE<br><input  id="timerSize" class="width100PCT" ></td></tr>
+
+                
+                <tr><td>PRESENTER NAME<br>X<br><input  id="presenterNameX" class="width100PCT" ></td>
+                <td><br>Y<br><input  id="presenterNameY" class="width100PCT" ></td>
+                <td><br>SIZE<br><input  id="presenterNameSize" class="width100PCT" ></td></tr>
+
+                <tr><td colspan="2">AUTO PLAY</td><td class="vAlignTop" style="text-align: center; ">
+                    <button  id="timerAutoPlay" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                <tr><td colspan="2">AUTO PLAY LAST STOP</td><td class="vAlignTop" style="text-align: center;">
+                    <button  id="timerAutoPlayLastStop" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                <tr><td colspan="2">MESSAGE FLASH</td><td class="vAlignTop" style="text-align: center;">
+                    <button  id="timerMessageFlash" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                <tr><td colspan="3">TIMER MAIN COLOR<br><input  id="timerMainColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
+                <tr>
+                    <td>&#60; THAN<br><input   id="timerFirstIntervalTimeChange" class="width100PCT" type="text" value="300"></td>
+                    <td>COLOR<br><input  id="timerFirstIntervalColorChange" class="width100PCT" value="#f5b942" ></td>
+                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                    <button  id="timerFirstIntervalFlash" class="small btn disabled checkboxType">&nbsp;</button></td>
+                </tr>
+                <tr>
+                    <td>&#60; THAN<br><input  id="timerSecondIntervalTimeChange" class="width100PCT" type="text" value="120"></td>
+                    <td>COLOR<br><input  id="timerSecondIntervalColorChange" class="width100PCT" value="#FF0000" ></td>
+                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                    <button  id="timerSecondIntervalFlash" class="small btn disabled checkboxType" >&nbsp;</button></td>
+                </tr>
+                <tr><td colspan="2">&#60; THAN 0 BACKGROUND COLOR<br><input  id="timerLessZeroBgColorChange" class="width100PCT" value="#FF0000" ></td>
+                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                    <button  id="timerLessZeroFlash" class="small btn checkboxType">&nbsp;</button></td></tr>
+                <tr><td colspan="3">< THAN 0 FOREGROUND COLOR<br><input  id="timerLessZeroFgColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
+                <tr><td colspan="3">BACKGROUND COLOR<br><input  id="pageBgColorChange" class="width100PCT" value="#000000" ></td></tr>
+                
+                <tr><td colspan="3" class="vAlignTop">BACKGROUND IMAGE (MAX 250K)</td></tr>
+                <tr>
+                    <td id="fileUploadTD" class="vAlignTop"  colspan="2">
+                        <input type="file" id="bgImageUpload" style="display: none;" accept='image/*'/>
+                        <button class='btn medium' value="UPLOAD" onclick="document.getElementById('bgImageUpload').click();" >UPLOAD</button>
+                        <button class='btn medium marginLeft5' id="bgImageDelete" >DELETE</button>
+                    </td>
+                </tr>
+                <tr><td colspan="3" class="vAlignTop">&nbsp;</td></tr>
+                <tr>
+                    <td class="textAlignRight"  colspan="3">
+                        <button class="medium btn " type="submit" id="modalRefreshButton"><img src="assets/images/refresh.png" height="10px" /></button>
+                        <button class="medium btn marginLeft5" type="submit" id="modalCancelButton">OK</button>
+                        <button class="medium btn marginLeft5" type="submit" id="modalSaveButton">SAVE</button>
+                        <button class="medium btn marginLeft5" type="submit" id="modalLoadButton">LOAD</button>
+                    </td>
+                </tr>
+            </table>
+      </div>
+    </div>
+    <div id="messageModal" class="modal">
+        <div class="modal-content content-wthree">
+            <textarea id="messageModalTextarea"></textarea>
+            <div class="floatRight">
+                <button class="btn marginLeft5" type="submit" id="mesageModalCancelButton">CANCEL</button>
+                <button class="btn marginLeft5" type="submit" id="mesageModalSendButton">SEND</button>
+            </div>
+            <div class="clearBoth"></div>
+        </div>
+    </div>
+    <div id="monitorModal" class="modal">
+        <div class="modal-content content-wthree">
+            <table>
+                <tr><td><div id="monitorScreenDiv"></div></td></tr>
+                <tr><td colspan="3">SEND TO MONITOR SCREEN ID:<br><input  id="sendToMonitorInput" class="width100PCT" ></td></tr>
+                <tr><td>
+                    <div class="floatRight">
+                        <button class="btn medium" type="submit" id="monitorModalOkButton">OK</button>
+                        <button class="btn medium marginLeft5" type="submit" id="monitorModalCancelButton">CLOSE</button>
+                    </div>
+                </td></tr>
+            </table>
+            <div class="clearBoth"></div>
+        </div>
+    </div>
+    <div id="QRModal" class="modal">
+        <div class="modal-content content-wthree">
+            <table>
+                <tr><td><div id='QRTextDiv'></div></td></tr>
+                <tr>
+                    <td>
+                        <div id="QRDiv"></div>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <div class="floatRight">
+                            <button class="btn marginLeft5" type="submit" id="QRModalCancelButton">CLOSE</button>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+            <div class="clearBoth"></div>
+        </div>
+    </div>
+</body>
+</html>

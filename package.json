@@ -1,0 +1,18 @@
+{
+  "name": "timer",
+  "version": "1.0.0",
+  "description": "Presenter Timer",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "express-ip": "^1.0.4",
+    "mysql": "^2.18.1",
+    "socket.io": "^3.1.2",
+    "stack-trace": "^1.0.0-pre1"
+  }
+}

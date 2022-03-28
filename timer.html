@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1,maximum-scale=1">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+    
+	<title>Timer</title>
+
+    
+    <link href="/timer/assets/css/timerScreen.css"           type="text/css" rel="stylesheet"> 
+    
+    <script src="/socket.io/socket.io.js">              </script> 
+    <script src="/timer/assets/js/jquery2.1.1.min.js">  </script>
+    <script src="/timer/assets/js/jquery.boxfit.js" type="application/javascript"></script>
+    
+
+    
+
+    <script src="/timer/assets/js/functions.js"></script>
+    <script src="/timer/assets/js/timerScreen.js"></script>
+ <script>
+    var clientType = 'timerScreen';
+</script>
+</head>
+<body>
+  <div id='offline-div'> </div>
+    <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
+  <div id='code-input-div'><div id="codeWrapper"><div id="code-div"></div><div id="QRDiv"></div>
+
+
+</div></div>
+  
+  <div id='message-div'><p></p></div>
+  <div id="timerScreenWrapper">
+    <div id='timer-name'></div>
+      <div id='presenter-name'></div>
+      <div id="timerClock"></div>
+      
+  </div>
+  <div id="screenId">ID:</div>
+  <div id="sceneChangeLogo" ></div>
+</body>
+</html>

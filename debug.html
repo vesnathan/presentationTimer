@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    
+    <script src="/socket.io/socket.io.js"></script> 
+    <script src="/timer/assets/js/jquery2.1.1.min.js"></script>
+    
+    
+
+    
+
+    
+    <!-- ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// -->
+    
+    <script>
+ 
+        
+            var socket = io.connect({
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax : 5000,
+                reconnectionAttempts: Infinity
+            });
+
+            socket.on('connect', function(reason){
+                socket.emit('newConnection', {'clientType': 'debugScreen'});
+            });
+
+        
+        $(function () {
+        $("#printArraysButton").click(function() {
+            socket.emit('printArrays', "");
+        });
+        });
+        
+        
+    </script>
+    </head>
+    <body>
+    <button type="button" id="printArraysButton">PRINT ARRAYS</button>
+</body>
+</html>

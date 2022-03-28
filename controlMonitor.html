@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1,maximum-scale=1">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+    
+	<title>Timer</title>
+
+    
+    <link href="/timer/assets/css/timerScreen.css"           type="text/css" rel="stylesheet"> 
+    
+    <script src="/socket.io/socket.io.js">              </script> 
+    <script src="/timer/assets/js/jquery2.1.1.min.js">  </script>
+    <script src="/timer/assets/js/jquery.boxfit.js" type="application/javascript"></script>
+    <script src="/timer/assets/js/functions.js"></script>
+
+    
+    <script src="/timer/assets/js/timerScreen.js"></script>
+
+  <script>
+    var clientType = 'monitorScreen';
+  </script>
+</head>
+<body>
+    <div id='message-div'><p></p></div>
+    <div id="timerScreenWrapper">
+        <div id='timer-name'></div>
+        <div id='presenter-name'></div>
+        <div id="timerClock"></div>
+        
+    </div>
+    <div id="screenId">ID:</div>
+    <div id="sceneChangeLogo" ></div>
+</body>
+</html>

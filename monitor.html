@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1,maximum-scale=1">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+    
+	<title>Monitor</title>
+ <link href="/timer/assets/css/style.css"               type="text/css" media="all" rel="stylesheet">
+    
+    <style>
+
+html { 
+    scroll-behavior: smooth;
+    background-image: none !important;
+    background: none !important; 
+    background-color: #000000 !important;
+}
+
+body {
+    scroll-behavior: smooth;
+    background-image: none !important; 
+    background: none !important; 
+    background-color: #000000 !important;
+    
+    margin: 0;
+    padding: 0;
+    font-family: 'Noto Sans JP', sans-serif;
+}
+#backButton                 { width: 30px; height: 30px; position: fixed; top: 30px; right: 30px; z-index: 3000; }
+.iFrameDeleteButton     {padding: 2px; background-color: red; font-weight: bold; position: absolute; top: 3px; right: 3px; font-size: 15;}
+.iFramwWrapper          { position: relative; float: left;}
+#wrapper                {  text-align: center; position: fixed;top: 50%; left: 50%;  transform: translate(-50%,-50%);  }
+
+
+    </style>
+    
+    
+    <script src="/socket.io/socket.io.js"                       type="application/javascript"></script>
+    <script src="/timer/assets/js/jquery2.1.1.min.js"      type="application/javascript"></script>
+    
+    <script src="/timer/assets/js/jquery.boxfit.js" type="application/javascript"></script>
+    <script src="/timer/assets/js/functions.js"></script>
+    <script>
+
+    var offlineInterval;            // interval used when the websocket disconnects, to update the display with dots
+    var offlineIntervalRunning = false;
+    var offlineIntervalCounter = 0;
+    var timersOnPage = [];
+    var socket = io.connect({
+        reconnection:           true,
+        reconnectionDelay:      1000,
+        reconnectionDelayMax:   5000,
+        reconnectionAttempts:   Infinity
+    });
+
+    $(function () {
+
+
+
+        socket.on('connect', function(reason){
+            socket.emit('newConnection', {'clientType': 'mainMonitor', "oldScreenId": getUrlVars()["monitorCode"], "newSocketId": socket.id});    
+
+            if (offlineIntervalRunning) {
+                clearInterval(offlineInterval);
+                offlineIntervalRunning = false;
+            }     
+        });   
+
+
+
+
+
+        socket.on('disconnect', function(reason){
+            $('#offline-div').show();
+            $('#offline-div-content').show();
+            if (reason === 'io server disconnect') {
+                socket.connect();
+            }
+            $("#loadingDots").html('.');
+            if (!offlineIntervalRunning) {
+                offlineInterval = setInterval(function(){
+                    $("#loadingDots").append('.');
+                    offlineIntervalCounter++;
+                    if (offlineIntervalCounter > 10) { offlineIntervalCounter = 0;  $("#loadingDots").html('.'); }
+                },1000); 
+            } 
+        });
+
+
+
+        socket.on('reconnected', function(msg){ // "data"
+            $('#offline-div').hide();
+            $('#offline-div-content').hide();
+        });
+        
+        socket.on('newMainMonitorScreenId', function(msg){ // newMainMonitorScreenId
+            $('#offline-div').hide();
+            $('#offline-div-content').hide();
+            if (history.pushState) {
+                var newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?monitorCode='+msg.newMainMonitorScreenId;
+                window.history.pushState({path:newurl},'',newurl);
+            }
+        });
+        $('#wrapper').on("click", ".iFrameDeleteButton", function(){
+            var id = $(this).attr('id');
+            $('#'+id).remove();
+            //socket.emit('monitorScreenRemoved', {"timerScreenId": id}); 
+        });
+
+        $("#timerNameAdd").click(function() {    
+            if (!timersOnPage.includes($('#timerNameInput').val())) {
+                timersOnPage.push($('#timerNameInput').val());
+                $("#monitorScreensWrapper").append(`
+                <div class='iFramwWrapper' id='`+$('#timerNameInput').val()+`'>
+                    <div id='`+$('#timerNameInput').val()+`' class='iFrameDeleteButton'>X</div>
+                    <iframe src="http://54.66.111.53:3000/timer/controlMonitor.html?timerCode=`+$('#timerNameInput').val()+`" ></iFrame>
+                </div>`);
+                $('#timerNameInput').val('');
+            }
+            else {
+                alert("Timer is already included.");
+                $('#timerNameInput').val('');
+            }
+        });
+        $("#sceneChangeLogo").click(function() {
+            socket.emit('printArrays', "");
+        });
+    });
+        
+  
+    </script>
+  </head>
+<body>
+    <div id='offline-div'> </div>
+    <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
+    <button class="backButton tiny btn" type="submit" id="backButton">&#60;</button>
+    <div id="wrapper" style="width: 100%; height: 100%;">
+        <div id='' style="float: left; width: 100%; text-align: left; padding: 10px; color: #ffffff; font-size: 10px; ">
+            <input  id="timerNameInput" class="inline"  style='height: 40px; margin-left: 20px;'><button class="medium  btn  inline marginLeft5" type="submit" id="timerNameAdd" >ADD</button>
+        </div> 
+    <div id="monitorScreensWrapper">
+    
+    </div>
+    </div>
+    <div id="monitorScreenId"></div><div id="sceneChangeLogo" ></div>
+
+</body>
+</html>
