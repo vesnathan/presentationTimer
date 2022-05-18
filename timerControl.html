@@ -148,10 +148,14 @@
             case "stop":
                 $("#timeStartButton").hide();
                 $("#timeStopButton").show();
+                $("#modalSaveButton").prop('disabled', false); 
+                $("#modalLoadButton").prop('disabled', false); 
                 break;
             case "start":
                 $("#timeStartButton").show();
                 $("#timeStopButton").hide();
+                $("#modalSaveButton").prop('disabled', true);
+                $("#modalLoadButton").prop('disabled', true);
                 break;
         }
     }
