@@ -6,7 +6,7 @@ var timerScreenId = "";
 var timerRunningInterval;       // an interval that will be defined when the timer is counting down
 var timerRunningIntervalFlag = false;
 var timeFlashIntervals = [];
-var logging = false;
+var logging = true;
 var logId = 0;
 var socket = io.connect({
     reconnection:           true,
@@ -24,7 +24,7 @@ $(function () {
     });
     
     socket.on('connect', function(reason){
-        // if (logging) { logger('connect','');   }
+        if (logging) { logger('connect','');   }
         socket.emit('newConnection', {'clientType': clientType, "oldScreenId": getUrlVars()["timerCode"], "newSocketId": socket.id});    
         if (offlineIntervalRunning) {
             clearInterval(offlineInterval);
@@ -35,7 +35,7 @@ $(function () {
     });   
 
     socket.on('disconnect', function(reason){
-        // if (logging) { logger('disconnect','');   }
+        if (logging) { logger('disconnect','');   }
         $('#offline-div').show();
         $('#offline-div-content').show();
         if (reason === 'io server disconnect') {
@@ -52,13 +52,13 @@ $(function () {
     });
 
     socket.on('newTimerScreenId', function(msg){
-        console.log('newTimerScreenId',msg);  
+        if (logging) {  logger('newTimerScreenId',msg);  }
         timerScreenId = msg['newTimerScreenId'];
         $('#code-div').html("Scan the QR code or enter the code <a href=\"http://54.66.111.53:3000/timer/timerControl.html?timerCode="+msg['newTimerScreenId']+"\" target=\"_blank\">"+msg['newTimerScreenId']+"</a> at http://54.66.111.53:3000/timer/timerControl.html");
         $('#offline-div').hide();
         $('#offline-div-content').hide();
         $('#code-input-div').show();
-        $("#timerScreenId").text("ID: " + timerScreenId);
+        $("#screenId").text("ID: " + timerScreenId);
         thisTimer = {}
         stopTimer("newTimerScreenId");
         timeFlashIntervalController("timerMessageFlash",null,"clear","#message-div","timerMessageFlash","");
@@ -66,10 +66,9 @@ $(function () {
     }); 
 
     socket.on('newControllerScreenId', function(msg){
-        // if (logging) {  logger('newControllerScreenId',msg);  }
-        console.log("newControllerScreenId",msg);
+        if (logging) {  logger('newControllerScreenId',msg);  }
         controllerScreenId = msg['newControllerScreenId'];
-     
+        $("#screenId").text("ID: " + controllerScreenId);
         thisTimer = {}
         stopTimer("newControllerScreenId");
         
@@ -81,8 +80,8 @@ $(function () {
         var tTime = dt.getHours() + ":" + dt.getMinutes() + ":" + dt.getSeconds();       
     });
 
-    socket.on('codeInputed', function(msg){ // codeInputed, data, clientType, monitorScreenId
-        console.log('codeInputed',msg);  
+    socket.on('codeInputed', function(msg){ // codeInputed, data
+        if (logging) {  logger('codeInputed',msg);  }
         $('#offline-div').hide();
         $("#code-input-div").hide();
         //timerId = msg.timerScreenId;
@@ -90,15 +89,7 @@ $(function () {
         timerIndex = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
         $("#timer-name").text(thisTimer.timerName);
         $('body').css({'background':thisTimer.pageBgColor});
-        
-        console.log("clientType",msg.clientType);
-        if (msg.clientType == "monitorScreen"){
-            $("#monitorScreenId").text("ID: " + msg.monitorScreenId);
-        }
-        else {
-            $("#timerScreenId").text("ID: " + msg.codeInputed);
-        }
-        
+        $("#screenId").text("ID: " + msg.codeInputed);
         if (thisTimer.pageBgImage) {
             socket.emit('getBgImage',{"screenType": "timerScreen","screenId":msg.codeInputed});
         }
@@ -142,14 +133,14 @@ $(function () {
     });
 
     socket.on('newTimerScreenQR', function(msg){
-        // if (logging) {  logger('newTimerScreenQR',msg);  }
+        if (logging) {  logger('newTimerScreenQR',msg);  }
         QRBgImageBase64Data = msg['newTimerScreenQR']; 
         $('#QRDiv').css({'background-image': 'url("'+QRBgImageBase64Data+'")'});
         $('#QRDiv').css('background-size','cover');
     });
 
     socket.on('bgImage', function(msg){ //{"data": dataURL});
-        // if (logging) {  logger('bgImage','');  }
+        if (logging) {  logger('bgImage','');  }
         
         $('body').css('background-image', 'url("'+msg.data+'")');
         $('body').css("background-size", "cover");
@@ -159,7 +150,7 @@ $(function () {
     });
     
     socket.on('bgImageReceived', function(msg){
-        // if (logging) {  logger('bgImageReceived','');  }
+        if (logging) {  logger('bgImageReceived','');  }
 
         $('body').css('background-image', 'url("'+msg.data+'")');
         $('body').css("background-size", "cover");
@@ -170,7 +161,7 @@ $(function () {
 
     socket.on('updateTimer', function(msg){ // a timer object was updated on the controller and forwarded by the server
         thisTimer = msg.data;
-        // if (logging) { logger("updateTimer",thisTimer); }
+        if (logging) { logger("updateTimer",thisTimer); }
         
         $("#timer-name").text(thisTimer.timerName);
 
@@ -236,12 +227,12 @@ $(function () {
     });
 
     socket.on('modalRefreshButton', function(msg){
-        // if (logging) { logger('modalRefreshButton',msg);  }
+        if (logging) { logger('modalRefreshButton',msg);  }
         window.location.reload();
     });
 
     function startTimer(whereFrom){
-        // if (logging) {  logger('startTimer',whereFrom); }
+        if (logging) {  logger('startTimer',whereFrom); }
         timerIndex = thisTimer.timers.findIndex(p => p.timerId == thisTimer.currentTimer);
         // check if the interveal is running, therefore the timer is running
         if (!timerRunningIntervalFlag) {
@@ -266,7 +257,7 @@ $(function () {
     }
 
     function stopTimer(fromWhere){
-        // if (logging) { logger('stopTimer',fromWhere);  }
+        if (logging) { logger('stopTimer',fromWhere);  }
         clearInterval(timerRunningInterval); 
         timerRunningIntervalFlag = false; 
         timeFlashIntervalController("timerLessZeroFlashTimerScreen","","clear","#timerScreenWrapper","stopTimer","");

@@ -39,14 +39,11 @@
 <script>
     $( function() {
         var linkArray = [];
-        linkArray.push({linkID: '1', iframeWidth: 400, iframeHeight: 650, linkAddress: '/timer/timerControl.html'});
-        linkArray.push({linkID: '2', iframeWidth: 400, iframeHeight: 650, linkAddress: '/timer/timerControl.html'});
-        linkArray.push({linkID: '3', iframeWidth: 400, iframeHeight: 650, linkAddress: '/timer/timerControl.html'});
-        linkArray.push({linkID: '4', iframeWidth: 650, iframeHeight: 650, linkAddress: '/timer/monitor.html'}); 
+        linkArray.push({linkID: '1', iframeWidth: 400, iframeHeight: 640, linkAddress: '/timer/timerControl.html'});
+        linkArray.push({linkID: '2', iframeWidth: 400, iframeHeight: 640, linkAddress: '/timer/timerControl.html'});
+        linkArray.push({linkID: '3', iframeWidth: 840, iframeHeight: 890, linkAddress: '/timer/monitor.html'}); 
+        linkArray.push({linkID: '4', iframeWidth: 400, iframeHeight: 240, linkAddress: '/timer/timer.html'}); 
         linkArray.push({linkID: '5', iframeWidth: 400, iframeHeight: 240, linkAddress: '/timer/timer.html'}); 
-        linkArray.push({linkID: '6', iframeWidth: 400, iframeHeight: 240, linkAddress: '/timer/timer.html'}); 
-        linkArray.push({linkID: '7', iframeWidth: 400, iframeHeight: 240, linkAddress: '/timer/timer.html'});
-        linkArray.push({linkID: '8', iframeWidth: 650, iframeHeight: 240, linkAddress: '/timer/index.html'}); 
         
         var i=0;
         console.log(linkArray);
@@ -65,14 +62,11 @@
         <tr>
             <td  id='1' valign='top'></td>
             <td  id='2' valign='top'></td>
-            <td  id='3' valign='top'></td>
-            <td  id='4' valign='top'></td>
+            <td  id='3' valign='top' rowspan="2"></td>
         </tr>
         <tr>
+            <td  id='4' valign='top'></td>
             <td  id='5' valign='top'></td>
-            <td  id='6' valign='top'></td>
-            <td  id='7' valign='top'></td>
-            <td  id='8' valign='top'></td>
         </tr>
     </table>
     <div id="sceneChangeLogo" ></div>

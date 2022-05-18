@@ -6,7 +6,7 @@
     
 
     <link href="/timer/assets/css/jquery-ui.css"           type="text/css" rel="stylesheet"> 
-    <link href="/timer/assets/css/style.css"               type="text/css" media="all" rel="stylesheet">
+    <link href="/timer/assets/css/controlScreen.css"               type="text/css" media="all" rel="stylesheet">
     <link href="/timer/assets/css/font-awesome.min.css"    type="text/css" media="all" rel="stylesheet">
 
     <script src="/socket.io/socket.io.js"                       type="application/javascript"></script>
@@ -710,7 +710,7 @@
             
             
             // alert('newControllerScreenId',msg);
-            controllerScreenId = msg['newControllerScreenId'].toString();
+            controllerScreenId = parseInt(msg.newControllerScreenId);
 
             // this is incase they scan the QR code.
             codeInputed = getUrlVars()["timerCode"];
@@ -767,7 +767,7 @@
             thisTimer = {}
             thisTimer = msg.data;
             $('#timerNameChange').val(thisTimer.timerName);
-            controllerScreenId = getUrlVars()["controllerCode"];
+            controllerScreenId = parseInt(getUrlVars()["controllerCode"]);
             console.log('thisTimer',thisTimer);
 
             $('#timerNameX').val(thisTimer.timerNameX);
@@ -788,6 +788,10 @@
             timerLessZeroBgColorChangePicker.fromString(thisTimer.timerLessZeroBgColor);
             timerLessZeroFgColorChangePicker.fromString(thisTimer.timerLessZeroFgColor);
             pageBgColorChangePicker.fromString(thisTimer.pageBgColor);
+            if (thisTimer.timerMessageOnScreen) {
+                buttonFlashIntervalController("messageButton", 500, "set", "#messageButton", "newControllerScreenId");
+
+            }
             if (thisTimer.pageBgImage) {
                 socket.emit('getBgImage',{"screenType": "controllerScreen","screenId":controllerScreenId});
             }
@@ -931,6 +935,10 @@
                 updateNextPrevButtons();
                 disableEnableStartButton();
             } 
+
+                            
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true); 
         });          
 $("#sceneChangeLogo").click(function() {
     socket.emit('printArrays', "");
@@ -1152,42 +1160,41 @@ $("#sceneChangeLogo").click(function() {
             }
         });
 
-$("#timers").on("click", ".timeMButton", function(){ //                                                                                     .timePlusButton
-    event.preventDefault();
-    var str = $(this).attr('id').split("-");      
-    var id = str[1];  
-    //$("#timePlusButton-"+id).hide();
-    //$("#timeMinusButton-"+id).show();
-    if ($("#timeMButton-"+id).hasClass("disabled")) {
-        $("#timeMButton-"+id).toggleClass("disabled");
-        $("#timeSButton-"+id).toggleClass("disabled");
-    }
+        $("#timers").on("click", ".timeMButton", function(){ //                                                                                     .timePlusButton
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];  
+            //$("#timePlusButton-"+id).hide();
+            //$("#timeMinusButton-"+id).show();
+            if ($("#timeMButton-"+id).hasClass("disabled")) {
+                $("#timeMButton-"+id).toggleClass("disabled");
+                $("#timeSButton-"+id).toggleClass("disabled");
+            }
 
-    var index = thisTimer.timers.findIndex(p => p.timerId == id);
-    thisTimer.timers[index].timerMinuteButton = true; 
-        
-    // update the state array to the server
-    controllerSettingsUpdate(socket,true);
-});
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            thisTimer.timers[index].timerMinuteButton = true; 
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
 
-$("#timers").on("click", ".timeSButton", function(){ //                                                                                     .timePlusButton
-    event.preventDefault();
-    var str = $(this).attr('id').split("-");      
-    var id = str[1];  
-    //$("#timePlusButton-"+id).hide();
-    //$("#timeMinusButton-"+id).show();
-    if ($("#timeSButton-"+id).hasClass("disabled")) {
-        $("#timeSButton-"+id).toggleClass("disabled");
-        $("#timeMButton-"+id).toggleClass("disabled");
-    }
+        $("#timers").on("click", ".timeSButton", function(){ //                                                                                     .timePlusButton
+            event.preventDefault();
+            var str = $(this).attr('id').split("-");      
+            var id = str[1];  
+            //$("#timePlusButton-"+id).hide();
+            //$("#timeMinusButton-"+id).show();
+            if ($("#timeSButton-"+id).hasClass("disabled")) {
+                $("#timeSButton-"+id).toggleClass("disabled");
+                $("#timeMButton-"+id).toggleClass("disabled");
+            }
 
-    var index = thisTimer.timers.findIndex(p => p.timerId == id);
-    thisTimer.timers[index].timerMinuteButton = false; 
-        
-    // update the state array to the server
-    controllerSettingsUpdate(socket,true);
-});
-
+            var index = thisTimer.timers.findIndex(p => p.timerId == id);
+            thisTimer.timers[index].timerMinuteButton = false; 
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+        });
 
         $("#timers").on("click", ".timeMinusButton", function(){ //                                                                                   .timeMinusButton
             event.preventDefault();
@@ -1200,7 +1207,6 @@ $("#timers").on("click", ".timeSButton", function(){ //                         
                 $("#timePlusButton-"+id).toggleClass("disabled");
                 $("#timeMinusButton-"+id).toggleClass("disabled");
             }
-
 
             var index = thisTimer.timers.findIndex(p => p.timerId == id);
             thisTimer.timers[index].timerJogButton = false;
@@ -1410,37 +1416,44 @@ $("#timers").on("click", ".timeSButton", function(){ //                         
         });
 
         
+        $("#modalLoadButton").change(function() {  //  savedSessionUpload
+            var reader = new FileReader();
+            if (typeof FileReader !== "undefined") {
+                reader.onload = function(){
+                    var dataURL = reader.result;
+                    
+                    
+                };
+                reader.readAsDataURL(this.files[0]);
+            }
+        });
         $("#bgImageUpload").change(function() { //                                                                                                         #bgImageUpload
             var reader = new FileReader();
             if (typeof FileReader !== "undefined") {
-                
-                // check file size
+                reader.onload = function(){
+                    var dataURL = reader.result;
+                    
+                    // check file size
+                    var size = document.getElementById('bgImageUpload').files[0].size;
+                    if (size < 751000) {
+                        $('body').css('background-image', 'url("'+dataURL+'")');
+                        $('body').css("background-size", "cover");
+                        $('body').css("background-repeat", "no-repeat");
+                        $('body').css("background-attachment", "fixed");
+                        $('body').css("background-position", "center center");
+                        thisTimer.pageBgImage = true; // dataURL;
+                        pageBgImageData = dataURL;
+
+                        // update the state array to the server
+                        controllerSettingsUpdate(socket,true);
+                        socket.emit("bgImage", {"controllerScreenId": controllerScreenId, "data": dataURL});
+                    }
+                    else {
+                        alert("File is too big, 750K limit.")
+                    }
+                };
+                reader.readAsDataURL(this.files[0]);
             }
-            reader.onload = function(){
-                var dataURL = reader.result;
-                var size = document.getElementById('bgImageUpload').files[0].size;
-                //console.log("size: "+size);
-                if (size < 751000) {
-                    $('body').css('background-image', 'url("'+dataURL+'")');
-                    $('body').css("background-size", "cover");
-                    $('body').css("background-repeat", "no-repeat");
-                    $('body').css("background-attachment", "fixed");
-                    $('body').css("background-position", "center center");
-                    thisTimer.pageBgImage = true; // dataURL;
-                    pageBgImageData = dataURL;
-
-                // update the state array to the server
-                controllerSettingsUpdate(socket,true);
-                socket.emit("bgImage", {"controllerScreenId": controllerScreenId, "data": dataURL});
-                
-                }
-                else {
-                    alert("File is too big, 750K limit.")
-                }
-            };
-            reader.readAsDataURL(this.files[0]);
-            
-
         });
 
 
@@ -1568,68 +1581,73 @@ $("#timers").on("click", ".timeSButton", function(){ //                         
             
             var tempTimerObject = Object.assign({}, thisTimer);
             tempTimerObject.pageBgImageData = pageBgImageData;
-            download(JSON.stringify(tempTimerObject), 'timer.txt', 'text/plain');
+            // download(JSON.stringify(tempTimerObject, 'timer.txt', 'text/plain'));
+            download(JSON.stringify(tempTimerObject, (key, value) => (value || ''), 4).replace(/"([^"]+)":/g, '$1:'), 'timer.txt', 'text/plain');
 
 
 
 
         });
-        $("#modalLoadButton").click(function(){ // 
-            // socket.emit("modalLoadButton",{"controllerScreenId": controllerScreenId}); 
+
+        $("#timerAutoPlay").click(function(){ //                                                                                                         #timerAutoPlay
+            $(this).toggleClass("disabled");
+            if ($("#timerAutoPlay").hasClass("disabled")) {
+                thisTimer.autoPlay = false;
+            }
+            else {
+                thisTimer.autoPlay = true;
+            }
+            
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);  
         });
 
-$("#timerAutoPlay").click(function(){ //                                                                                                         #timerAutoPlay
-    $(this).toggleClass("disabled");
-    if ($("#timerAutoPlay").hasClass("disabled")) {
-        thisTimer.autoPlay = false;
-    }
-    else {
-        thisTimer.autoPlay = true;
-    }
-    
-    // update the state array to the server
-    controllerSettingsUpdate(socket,true);  
-});
+        $("#timerMessageFlash").click(function(){ //                                                                                                         #timerAutoPlay
+            $(this).toggleClass("disabled");
+            if ($("#timerMessageFlash").hasClass("disabled")) {
+                thisTimer.timerMessageFlash = false;
+            }
+            else {
+                thisTimer.timerMessageFlash = true;
+            }
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);
+            
+        });
 
-$("#timerMessageFlash").click(function(){ //                                                                                                         #timerAutoPlay
-    $(this).toggleClass("disabled");
-    if ($("#timerMessageFlash").hasClass("disabled")) {
-        thisTimer.timerMessageFlash = false;
-    }
-    else {
-        thisTimer.timerMessageFlash = true;
-    }
-        
-    // update the state array to the server
-    controllerSettingsUpdate(socket,true);
-      
-});
+        $("#monitorModalOkButton").click(function(){
+            var monitorScreenId = parseInt($("#sendToMonitorInput").val());
+            if (monitorScreenId != null && monitorScreenId != undefined && monitorScreenId != "undefined") {
+                socket.emit('sendTimerScreenToMonitor', {"controllerScreenId": controllerScreenId, "timerScreenId": timerScreenId, "monitorScreenId": monitorScreenId});
+                
+                $("#monitorModal").hide();
+                $("#monitorScreenDiv").empty();
+                $("#sendToMonitorInput").val('');
+            }
 
+        });
 
-
-$("#timerAutoPlayLastStop").click(function(){ //                                                                                                         #timerAutoPlay
-    $(this).toggleClass("disabled");
-    if ($("#timerAutoPlayLastStop").hasClass("disabled")) {
-        thisTimer.autoPlayLastStop = false;
-    }
-    else {
-        thisTimer.autoPlayLastStop = true;
-    }
-        
-    // update the state array to the server
-    controllerSettingsUpdate(socket,true);  
-});
+        $("#timerAutoPlayLastStop").click(function(){ //                                                                                                         #timerAutoPlay
+            $(this).toggleClass("disabled");
+            if ($("#timerAutoPlayLastStop").hasClass("disabled")) {
+                thisTimer.autoPlayLastStop = false;
+            }
+            else {
+                thisTimer.autoPlayLastStop = true;
+            }
+                
+            // update the state array to the server
+            controllerSettingsUpdate(socket,true);  
+        });
 
         $("#timerLessZeroFlash").click(function(){ //                                                                                                    #timerLessZeroFlash
             $(this).toggleClass("disabled");
-            if ($("#timerLessZeroFlash").hasClass("disabled")) {
-
-                
+            if ($("#timerLessZeroFlash").hasClass("disabled")) {  
                 thisTimer.timerLessZeroFlash = false;
             }
             else {
                 thisTimer.timerLessZeroFlash = true;
-                
             } 
                 
             // update the state array to the server
@@ -1639,7 +1657,6 @@ $("#timerAutoPlayLastStop").click(function(){ //                                
         $("#modalRefreshButton").click(function(){ //                                                                                                    #modalRefreshButton
             socket.emit("modalRefreshButton",{"controllerScreenId": controllerScreenId}); 
         });
-        
         
         $("#messageModalTextarea").inputFilter(function(value) { //                                                                                      #messageModalTextarea
             return /^[0-9a-zA-Z' \r\n:".]*$/i.test(value); 
@@ -1661,152 +1678,155 @@ $("#timerAutoPlayLastStop").click(function(){ //                                
 </head>
 <body>
 
+    <div id="mainWrapper">
+        <div id='code-input-div'>
+            INPUT TIMER SCREEN CODE<br>
+            <div id='code-div'>
+                <input id='timer-screen-code-input' class='code-input text-input ui-corner-all ui-widget'>
+            </div>
+        </div> 
 
-<div id='code-input-div'>
-    INPUT TIMER SCREEN CODE<br>
-    <div id='code-div'>
-        <input id='timer-screen-code-input' class='code-input text-input ui-corner-all ui-widget'>
-    </div>
-</div> 
-
-    <div id='offline-div'> </div>
-    <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
-    
-        <div id="block" class="w3lvide-content" >
-            <div class="workinghny-form-grid">
-                <div class="main-hotair">
-                    <div class="content-wthree">
-                        <div id="timers">
+            <div id='offline-div'> </div>
+            <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
+            
+            <div id="block" class="w3lvide-content" >
+                <div class="workinghny-form-grid">
+                    <div class="main-hotair">
+                        <div class="content-wthree">
+                            <div id="timers">
+                                
+                            </div>
+                            <br><br><br>
+                            <div id="buttonHolder">
+                                <button class="medium timeStartButton btn marginLeft5" type="submit" id="timeStartButton" disabled>START</button>
+                                <button class="medium timeStopButton btn marginLeft5" type="submit" id="timeStopButton">PAUSE</button> 
+                                <button class="medium timeNextButton btn marginLeft5" type="submit" id="timeNextButton" disabled>NEXT</button>
+                                <button class="medium timePrevButton btn marginLeft5" type="submit" id="timePrevButton" disabled>PREV</button>
+                                <button class="medium backButton btn marginLeft5" type="submit" id="backButton">HOME</button>
+                                <br><br>
+                                <button class="medium btn marginLeft5 marginTop5" type="submit" id="addTimerButton">ADD</button>
+                                <button class="medium btn marginLeft5 marginTop5" type="submit" id="settingsButton">SETTINGS</button>
+                                <button class="medium btn marginLeft5 marginTop5" type="submit" id="messageButton">MESSAGE</button>
+                                <button class="medium btn marginLeft5 marginTop5" type="submit" id="monitorButton">MONITOR</button>
+                                <br><br>
+                                <button class="medium btn marginLeft5 marginTop5" type="submit" id="transferControlButton">TRANSFER</button>
+                            </div>
                             
-                        </div>
-                        <br><br><br>
-                        <button class="medium timeStartButton btn marginLeft5" type="submit" id="timeStartButton" disabled>START</button>
-                        <button class="medium timeStopButton btn marginLeft5" type="submit" id="timeStopButton">PAUSE</button> 
-                        <button class="medium timeNextButton btn marginLeft5" type="submit" id="timeNextButton" disabled>NEXT</button>
-                        <button class="medium timePrevButton btn marginLeft5" type="submit" id="timePrevButton" disabled>PREV</button>
-                        <button class="medium backButton btn marginLeft5" type="submit" id="backButton">HOME</button>
-                        <br><br>
-                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="addTimerButton">ADD</button>
-                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="settingsButton">SETTINGS</button>
-                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="messageButton">MESSAGE</button>
-                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="monitorButton">MONITOR</button>
-                        <br><br>
-                        <button class="medium btn marginLeft5 marginTop5" type="submit" id="transferControlButton">TRANSFER</button>
+                        </div>   
+                    </div>
+                </div>
+            </div>
+            <div id="controllerScreenId"></div><div id="sceneChangeLogo"></div>
+            <div id="myModal" class="modal">
+                <div class="modal-content content-wthree">
+                    <table border="0">
+                        <tr><td colspan="2"><div id="timerIdHolder">TIMER SCREEN ID:</td><td><div id="timerIdHolderCode"></div></div></td></tr>
+
+                        <tr><td colspan="3">TIMER NAME<br><input  id="timerNameChange" class="width100PCT" ></td></tr>
+                        <tr><td style='padding: 0;'>X<br><input  id="timerNameX" class="width100PCT" ></td>
+                        <td style='padding: 0;'>Y<br><input  id="timerNameY" class="width100PCT" ></td>
+                        <td  style='padding: 0;'>SIZE<br><input  id="timerNameSize" class="width100PCT" ></td></tr>
                         
+                        <tr><td>TIMER<br>X<br><input  id="timerX" class="width100PCT" ></td>
+                        <td ><br>Y<br><input  id="timerY" class="width100PCT" ></td>
+                        <td ><br>SIZE<br><input  id="timerSize" class="width100PCT" ></td></tr>
+
                         
-                    </div>   
+                        <tr><td>PRESENTER NAME<br>X<br><input  id="presenterNameX" class="width100PCT" ></td>
+                        <td><br>Y<br><input  id="presenterNameY" class="width100PCT" ></td>
+                        <td><br>SIZE<br><input  id="presenterNameSize" class="width100PCT" ></td></tr>
+
+                        <tr><td colspan="2">AUTO PLAY</td><td class="vAlignTop" style="text-align: center; ">
+                            <button  id="timerAutoPlay" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                        <tr><td colspan="2">AUTO PLAY LAST STOP</td><td class="vAlignTop" style="text-align: center;">
+                            <button  id="timerAutoPlayLastStop" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                        <tr><td colspan="2">MESSAGE FLASH</td><td class="vAlignTop" style="text-align: center;">
+                            <button  id="timerMessageFlash" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
+                        <tr><td colspan="3">TIMER MAIN COLOR<br><input  id="timerMainColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
+                        <tr>
+                            <td>&#60; THAN<br><input   id="timerFirstIntervalTimeChange" class="width100PCT" type="text" value="300"></td>
+                            <td>COLOR<br><input  id="timerFirstIntervalColorChange" class="width100PCT" value="#f5b942" ></td>
+                            <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                            <button  id="timerFirstIntervalFlash" class="small btn disabled checkboxType">&nbsp;</button></td>
+                        </tr>
+                        <tr>
+                            <td>&#60; THAN<br><input  id="timerSecondIntervalTimeChange" class="width100PCT" type="text" value="120"></td>
+                            <td>COLOR<br><input  id="timerSecondIntervalColorChange" class="width100PCT" value="#FF0000" ></td>
+                            <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                            <button  id="timerSecondIntervalFlash" class="small btn disabled checkboxType" >&nbsp;</button></td>
+                        </tr>
+                        <tr><td colspan="2">&#60; THAN 0 BACKGROUND COLOR<br><input  id="timerLessZeroBgColorChange" class="width100PCT" value="#FF0000" ></td>
+                            <td class="vAlignTop" style="text-align: center;">FLASH<br>
+                            <button  id="timerLessZeroFlash" class="small btn checkboxType">&nbsp;</button></td></tr>
+                        <tr><td colspan="3">< THAN 0 FOREGROUND COLOR<br><input  id="timerLessZeroFgColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
+                        <tr><td colspan="3">BACKGROUND COLOR<br><input  id="pageBgColorChange" class="width100PCT" value="#000000" ></td></tr>
+                        
+                        <tr><td colspan="3" class="vAlignTop">BACKGROUND IMAGE (MAX 250K)</td></tr>
+                        <tr>
+                            <td id="fileUploadTD" class="vAlignTop"  colspan="2">
+                                <input type="file" id="bgImageUpload" style="display: none;" accept='image/*'/>
+                                <button class='btn medium' value="UPLOAD" onclick="document.getElementById('bgImageUpload').click();" >UPLOAD</button>
+                                <button class='btn medium marginLeft5' id="bgImageDelete" >DELETE</button>
+                            </td>
+                        </tr>
+                        <tr><td colspan="3" class="vAlignTop">&nbsp;</td></tr>
+                        <tr>
+                            <td class="textAlignRight"  colspan="3">
+                                <button class="medium btn " type="submit" id="modalRefreshButton"><img src="assets/images/refresh.png" height="10px" /></button>
+                                <button class="medium btn marginLeft5" type="submit" id="modalCancelButton">OK</button>
+                                <button class="medium btn marginLeft5" type="submit" id="modalSaveButton">SAVE</button>
+                                <input type="file" id="modalLoadButton" style="display: none;" accept='text/plain'/>
+                                <button class="medium btn marginLeft5" onclick="document.getElementById('modalLoadButton').click();" >LOAD</button>
+                            </td>
+                        </tr>
+                    </table>
+            </div>
+            </div>
+            <div id="messageModal" class="modal">
+                <div class="modal-content content-wthree">
+                    <textarea id="messageModalTextarea"></textarea>
+                    <div class="floatRight">
+                        <button class="btn marginLeft5" type="submit" id="mesageModalCancelButton">CANCEL</button>
+                        <button class="btn marginLeft5" type="submit" id="mesageModalSendButton">SEND</button>
+                    </div>
+                    <div class="clearBoth"></div>
+                </div>
+            </div>
+            <div id="monitorModal" class="modal">
+                <div class="modal-content content-wthree">
+                    <table>
+                        <tr><td><div id="monitorScreenDiv"></div></td></tr>
+                        <tr><td colspan="3">SEND TO MONITOR SCREEN ID:<br><input  id="sendToMonitorInput" class="width100PCT" ></td></tr>
+                        <tr><td>
+                            <div class="floatRight">
+                                <button class="btn medium" type="submit" id="monitorModalOkButton">OK</button>
+                                <button class="btn medium marginLeft5" type="submit" id="monitorModalCancelButton">CLOSE</button>
+                            </div>
+                        </td></tr>
+                    </table>
+                    <div class="clearBoth"></div>
+                </div>
+            </div>
+            <div id="QRModal" class="modal">
+                <div class="modal-content content-wthree">
+                    <table>
+                        <tr><td><div id='QRTextDiv'></div></td></tr>
+                        <tr>
+                            <td>
+                                <div id="QRDiv"></div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="floatRight">
+                                    <button class="btn marginLeft5" type="submit" id="QRModalCancelButton">CLOSE</button>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    <div class="clearBoth"></div>
                 </div>
             </div>
         </div>
-    <div id="controllerScreenId"></div><div id="sceneChangeLogo"></div>
-    <div id="myModal" class="modal">
-        <div class="modal-content content-wthree">
-            <table border="0">
-                <tr><td colspan="2"><div id="timerIdHolder">TIMER SCREEN ID:</td><td><div id="timerIdHolderCode"></div></div></td></tr>
-
-                <tr><td colspan="3">TIMER NAME<br><input  id="timerNameChange" class="width100PCT" ></td></tr>
-                <tr><td style='padding: 0;'>X<br><input  id="timerNameX" class="width100PCT" ></td>
-                <td style='padding: 0;'>Y<br><input  id="timerNameY" class="width100PCT" ></td>
-                <td  style='padding: 0;'>SIZE<br><input  id="timerNameSize" class="width100PCT" ></td></tr>
-                
-                <tr><td>TIMER<br>X<br><input  id="timerX" class="width100PCT" ></td>
-                <td ><br>Y<br><input  id="timerY" class="width100PCT" ></td>
-                <td ><br>SIZE<br><input  id="timerSize" class="width100PCT" ></td></tr>
-
-                
-                <tr><td>PRESENTER NAME<br>X<br><input  id="presenterNameX" class="width100PCT" ></td>
-                <td><br>Y<br><input  id="presenterNameY" class="width100PCT" ></td>
-                <td><br>SIZE<br><input  id="presenterNameSize" class="width100PCT" ></td></tr>
-
-                <tr><td colspan="2">AUTO PLAY</td><td class="vAlignTop" style="text-align: center; ">
-                    <button  id="timerAutoPlay" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
-                <tr><td colspan="2">AUTO PLAY LAST STOP</td><td class="vAlignTop" style="text-align: center;">
-                    <button  id="timerAutoPlayLastStop" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
-                <tr><td colspan="2">MESSAGE FLASH</td><td class="vAlignTop" style="text-align: center;">
-                    <button  id="timerMessageFlash" class="small btn disabled checkboxType" >&nbsp;</button></td></tr>
-                <tr><td colspan="3">TIMER MAIN COLOR<br><input  id="timerMainColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
-                <tr>
-                    <td>&#60; THAN<br><input   id="timerFirstIntervalTimeChange" class="width100PCT" type="text" value="300"></td>
-                    <td>COLOR<br><input  id="timerFirstIntervalColorChange" class="width100PCT" value="#f5b942" ></td>
-                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
-                    <button  id="timerFirstIntervalFlash" class="small btn disabled checkboxType">&nbsp;</button></td>
-                </tr>
-                <tr>
-                    <td>&#60; THAN<br><input  id="timerSecondIntervalTimeChange" class="width100PCT" type="text" value="120"></td>
-                    <td>COLOR<br><input  id="timerSecondIntervalColorChange" class="width100PCT" value="#FF0000" ></td>
-                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
-                    <button  id="timerSecondIntervalFlash" class="small btn disabled checkboxType" >&nbsp;</button></td>
-                </tr>
-                <tr><td colspan="2">&#60; THAN 0 BACKGROUND COLOR<br><input  id="timerLessZeroBgColorChange" class="width100PCT" value="#FF0000" ></td>
-                    <td class="vAlignTop" style="text-align: center;">FLASH<br>
-                    <button  id="timerLessZeroFlash" class="small btn checkboxType">&nbsp;</button></td></tr>
-                <tr><td colspan="3">< THAN 0 FOREGROUND COLOR<br><input  id="timerLessZeroFgColorChange" class="width100PCT" value="#FFFFFF" ></td></tr>
-                <tr><td colspan="3">BACKGROUND COLOR<br><input  id="pageBgColorChange" class="width100PCT" value="#000000" ></td></tr>
-                
-                <tr><td colspan="3" class="vAlignTop">BACKGROUND IMAGE (MAX 250K)</td></tr>
-                <tr>
-                    <td id="fileUploadTD" class="vAlignTop"  colspan="2">
-                        <input type="file" id="bgImageUpload" style="display: none;" accept='image/*'/>
-                        <button class='btn medium' value="UPLOAD" onclick="document.getElementById('bgImageUpload').click();" >UPLOAD</button>
-                        <button class='btn medium marginLeft5' id="bgImageDelete" >DELETE</button>
-                    </td>
-                </tr>
-                <tr><td colspan="3" class="vAlignTop">&nbsp;</td></tr>
-                <tr>
-                    <td class="textAlignRight"  colspan="3">
-                        <button class="medium btn " type="submit" id="modalRefreshButton"><img src="assets/images/refresh.png" height="10px" /></button>
-                        <button class="medium btn marginLeft5" type="submit" id="modalCancelButton">OK</button>
-                        <button class="medium btn marginLeft5" type="submit" id="modalSaveButton">SAVE</button>
-                        <button class="medium btn marginLeft5" type="submit" id="modalLoadButton">LOAD</button>
-                    </td>
-                </tr>
-            </table>
-      </div>
-    </div>
-    <div id="messageModal" class="modal">
-        <div class="modal-content content-wthree">
-            <textarea id="messageModalTextarea"></textarea>
-            <div class="floatRight">
-                <button class="btn marginLeft5" type="submit" id="mesageModalCancelButton">CANCEL</button>
-                <button class="btn marginLeft5" type="submit" id="mesageModalSendButton">SEND</button>
-            </div>
-            <div class="clearBoth"></div>
-        </div>
-    </div>
-    <div id="monitorModal" class="modal">
-        <div class="modal-content content-wthree">
-            <table>
-                <tr><td><div id="monitorScreenDiv"></div></td></tr>
-                <tr><td colspan="3">SEND TO MONITOR SCREEN ID:<br><input  id="sendToMonitorInput" class="width100PCT" ></td></tr>
-                <tr><td>
-                    <div class="floatRight">
-                        <button class="btn medium" type="submit" id="monitorModalOkButton">OK</button>
-                        <button class="btn medium marginLeft5" type="submit" id="monitorModalCancelButton">CLOSE</button>
-                    </div>
-                </td></tr>
-            </table>
-            <div class="clearBoth"></div>
-        </div>
-    </div>
-    <div id="QRModal" class="modal">
-        <div class="modal-content content-wthree">
-            <table>
-                <tr><td><div id='QRTextDiv'></div></td></tr>
-                <tr>
-                    <td>
-                        <div id="QRDiv"></div>
-                    </td>
-                </tr>
-                <tr>
-                    <td>
-                        <div class="floatRight">
-                            <button class="btn marginLeft5" type="submit" id="QRModalCancelButton">CLOSE</button>
-                        </div>
-                    </td>
-                </tr>
-            </table>
-            <div class="clearBoth"></div>
-        </div>
-    </div>
-</body>
+    </body>
 </html>

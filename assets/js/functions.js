@@ -254,12 +254,13 @@ function convertTimeEpochToString(t) {
 }
 
 function logger(sentFrom, message) {
-
+/*
     console.log(logId+": _______________________________________________");
     console.log("---"+sentFrom+"---");
     console.log(message);
     console.log();
     logId++;
+    */
 }
 
 function getUrlVars(){

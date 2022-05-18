@@ -25,7 +25,7 @@ app.get(pathURL+'assets/js/jquery-ui.js', function(req, res){  res.sendFile(__di
 app.get(pathURL+'assets/css/jquery-ui.css', function(req, res){  res.sendFile(__dirname + '/assets/css/jquery-ui.css');});
 app.get(pathURL+'index.html', function(req, res){  res.sendFile(__dirname + '/index.html');});
 app.get(pathURL+'index.html', function(req, res){  res.sendFile(__dirname + '/index.html');});
-app.get(pathURL+'assets/css/style.css', function(req, res){  res.sendFile(__dirname + '/assets/css/style.css');});
+app.get(pathURL+'assets/css/controlScreen.css', function(req, res){  res.sendFile(__dirname + '/assets/css/controlScreen.css');});
 app.get(pathURL+'assets/css/timerScreen.css', function(req, res){  res.sendFile(__dirname + '/assets/css/timerScreen.css');});
 app.get(pathURL+'assets/css/font-awesome.min.css', function(req, res){  res.sendFile(__dirname + '/assets/css/font-awesome.min.css');});
 app.get(pathURL+'assets/js/jquery.vide.js', function(req, res){  res.sendFile(__dirname + '/assets/js/jquery.vide.js');});
@@ -81,7 +81,7 @@ var bingBongIntervalArray = [];
 
 var logging = false;
 
-
+var sessionsRemainActiveBeforeDeletionTime = 43200000;
 
 const fs = require("fs");
 
@@ -176,8 +176,18 @@ function delMainMonitorScreen(screenIdToDelete){
 }
 function delSession(sessionIdToDelete) {  // the time limit has expired, delete the session
     if (logging) { console.log("delSession",sessionIdToDelete);}
+    console.log("delSession",sessionIdToDelete);
     // delete session from SessionsActive
     var indexOfSessionToDelete = sessionsActive.indexOf(sessionsActive.find(session => session.sessionId == sessionIdToDelete));
+
+    // delete session txt file from ./sessionSaveFiles/
+    fs.unlink('./sessionSaveFiles/'+sessionIdToDelete+'.txt', function (err) { });
+    
+    // delete session image file from ./sessionBgImages/
+    fs.unlink('./sessionBgImages/'+sessionIdToDelete+'.txt', function (err) {});
+
+    
+
 
     if(indexOfSessionToDelete != -1) {
 
@@ -210,6 +220,16 @@ function delSession(sessionIdToDelete) {  // the time limit has expired, delete 
             if (thisTimerScreen != null && thisTimerScreen != undefined && thisTimerScreen != "undefined") {
                 io.to(thisTimerScreen.socketId).emit("modalRefreshButton");
             }
+
+            // delete timerId from mainMonitorScreensActive
+            mainMonitorScreensShowingTimerId = mainMonitorScreensActive.filter(thisMainMonitorScreen => thisMainMonitorScreen.timerScreens.includes(timerScreenId));
+            if (mainMonitorScreensShowingTimerId != null && mainMonitorScreensShowingTimerId != undefined && mainMonitorScreensShowingTimerId != "undefined") {    
+                
+                mainMonitorScreensShowingTimerId.forEach(function(mainMonitorScreen, index) {
+                    mainMonitorScreen.timerScreens.splice(mainMonitorScreen.timerScreens.indexOf(timerScreenId),1);
+                    io.to(mainMonitorScreen.socketId).emit("timerScreenIdSessionDeleted", {"timerScreenId": timerScreenId});
+                });
+            }
         });
 
         // send a message to controller screens, and delete controllerScreenIds from controllerScreenIdsUsed[] and controllerScreenIdsSocketIds[]
@@ -234,7 +254,7 @@ function delSession(sessionIdToDelete) {  // the time limit has expired, delete 
 
             // delete any image data from bgImages[]
             // "controllerScreenId": controllerScreenId,"data": imageData
-            bgImages.splice(bgImages.indexOf(bgImages.find(bgImage => bgImage.controllerScreenId === controllerScreenId)),1);
+            bgImages.splice(bgImages.indexOf(bgImages.find(bgImage => bgImage.sessionId === sessionIdToDelete)),1);
 
         });
 
@@ -267,19 +287,22 @@ function delSession(sessionIdToDelete) {  // the time limit has expired, delete 
 }
 
 function scheduleSessionDelete(sessionIdToDelete) {
-    if (logging) { console.log('scheduleSessionDelete',sessionIdToDelete);}
-    // if a client disconnects, they have 12 hours (43200000 ms) to reconnect or the session will be destroyed. This covers phones that lock and kill connection.
-    if (!sessionsToDelete.includes(sessionIdToDelete)) {
-        var scheduleTimeout = setTimeout(function() {
-            delSession(sessionIdToDelete);
-        }, 43200000);
-        sessionsToDelete.push({
-            "sessionId": sessionIdToDelete,
-            "timeout": scheduleTimeout
-        });
+    // don't delete these three as they are for the demo
+    if (sessionIdToDelete != 1 && sessionIdToDelete != 2 && sessionIdToDelete != 3) {
+        if (logging) { console.log('scheduleSessionDelete',sessionIdToDelete);}
+        
+        // if a client disconnects, they have 12 hours (43200000 ms) to reconnect or the session will be destroyed. This covers phones that lock and kill connection. 
+        var sessionAlreadyScheduled = sessionsToDelete.find(sessionToDelete => sessionToDelete.sessionId === sessionIdToDelete);
+        if (sessionAlreadyScheduled == null || sessionAlreadyScheduled == undefined || sessionAlreadyScheduled == "undefined") {
+            var scheduleTimeout = setTimeout(function() {
+                delSession(sessionIdToDelete);
+            },  sessionsRemainActiveBeforeDeletionTime);
+            sessionsToDelete.push({
+                "sessionId": sessionIdToDelete,
+                "timeout": scheduleTimeout
+            });
+        }
     }
-    
-
 }
 
 io.on('connection', function(socket){
@@ -369,10 +392,11 @@ io.on('connection', function(socket){
         
         var thisMonitorScreen = monitorScreenIdsSocketIds.find(monitorScreen => monitorScreen.socketId == socket.id);
         if(typeof thisMonitorScreen === "object"){
-            // delete from monitorScreenIdsSocketIds
-            
+
+            // delete from monitorScreenIdsSocketIds because this will be re-added if it's a refresh
             monitorScreenIdsSocketIds.splice(monitorScreenIdsSocketIds.indexOf(thisMonitorScreen),1);
-            // delete from monitorScreenIdsUsed
+
+            // delete from monitorScreenIdsUsed because this will be re-added if it's a refresh
             monitorScreenIdsUsed.splice(monitorScreenIdsUsed.indexOf(thisMonitorScreen.monitorScreenId),1);
 
             // delete from sessionsActive monitorScreens
@@ -389,7 +413,7 @@ io.on('connection', function(socket){
         if(typeof thisMainMonitorScreen === "object"){
             var scheduleTimeout = setTimeout(function() {
                 delMainMonitorScreen(thisMainMonitorScreen.mainMonitorScreenId);
-            }, 43200000);
+            }, sessionsRemainActiveBeforeDeletionTime);
             mainMonitorScreensToDelete.push({
                 "mainMonitorScreenId":thisMainMonitorScreen.mainMonitorScreenId,
                 "interval":scheduleTimeout
@@ -413,17 +437,23 @@ io.on('connection', function(socket){
         if (msg["clientType"] == "mainMonitor") { // clientType, oldScreenId, newSocketId
             var found = false;
             var oldScreenId = parseInt(msg.oldScreenId);
+            //console.log("newConnection",msg);
 
             // see if old screen id is already active. If so, the screen has refreshed
-            mainMonitorScreensActive.forEach(function (mainMonitorScreen, index) {
-                if (mainMonitorScreen.timerScreens.includes(oldScreenId)) {
+            mainMonitorScreensActive.forEach(function (thisMainMonitorScreen, index) {
+                if (thisMainMonitorScreen.mainMonitorScreenId == oldScreenId) {
                     found = true;
-                    mainMonitorScreenIdsSocketIds[mainMonitorScreenIdsSocketIds.findIndex(obj => obj.mainMonitorScreenId == oldScreenId)].socketId = msg.newSocketId;
+                    thisMainMonitorScreen.socketId = msg.newSocketId;
                     if (msg != null && msg != undefined && msg != "undefined") {
-                        io.to(msg.newSocketId).emit("reconnected", {"data": item});
+                        io.to(msg.newSocketId).emit("reconnect");
+                        // loop through timers associated with this mainMonitorScreen and resend them
+                        thisMainMonitorScreen.timerScreens.forEach(function(thisTimerId) {
+                            io.to(msg.newSocketId).emit("timerScreenId", {"timerScreenId": thisTimerId});
+                            console.log("thisTimerId",thisTimerId);
+                        });
                     }
                     // kill session delete timeout and remove from mainMonitorScreensToDelete if it's in there
-                    var mainMonitorScreenToDeleteIndex = mainMonitorScreensToDelete.indexOf(mainMonitorScreensToDelete.find(obj => obj.sessionId === item.sessionId));
+                    var mainMonitorScreenToDeleteIndex = mainMonitorScreensToDelete.indexOf(mainMonitorScreensToDelete.find(obj => obj.sessionId === msg.sessionId));
                     
                     if (mainMonitorScreenToDeleteIndex != -1) { 
                         clearTimeout(mainMonitorScreensToDelete[mainMonitorScreenToDeleteIndex].timeout);
@@ -443,6 +473,13 @@ io.on('connection', function(socket){
                     "timerScreens": []
                 }
                 mainMonitorScreensActive.push(newMainMonitorScreenObject);
+                
+                // write a file to server for crash recovery
+                fs.writeFile('./activeMonitorScreens/'+newMainMonitorScreenId+'.txt', JSON.stringify(newMainMonitorScreenObject.timerScreens), function (err) {
+                    if (err) 
+                        return console.log(err);
+                });
+
             }
         }
         if (msg["clientType"] == "timerScreen") {
@@ -553,7 +590,7 @@ io.on('connection', function(socket){
                         if (thisTimerScreenId == msg.oldScreenId) {
                             thisSession.monitorScreens.push(parseInt(newMonitorScreenId));
                             if (socket != null && socket != undefined && socket != "undefined") {
-                                io.to(socket.id).emit("codeInputed", {"codeInputed": thisSession.timerScreens[0], "data": thisSession});
+                                io.to(socket.id).emit("codeInputed", {"codeInputed": thisSession.timerScreens[0], "data": thisSession, "clientType": "monitorScreen", "monitorScreenId":parseInt(newMonitorScreenId)});
                             }
                         }
                     });
@@ -562,6 +599,7 @@ io.on('connection', function(socket){
                         io.to(thisControllerScreenIdSocketId.socketId).emit("monitorScreensUpdate",{'monitorScreenIds':thisSession.monitorScreens});
                     });
                 });
+                
             }         
         }
     });
@@ -571,11 +609,107 @@ io.on('connection', function(socket){
 
     });
 */
+    socket.on('timerScreenRemovedFromMainMonitor', function(msg){ //  timerScreenId, mainMoniterScreenId
+        
+        timerScreenId = parseInt(msg.timerScreenId);
+        // get the session the timerScreenId belongs to
+        var thisMainMonitor = mainMonitorScreensActive.filter(monitorScreen => monitorScreen.mainMonitorScreenId === parseInt(msg.mainMoniterScreenId));
+        
+        if (thisMainMonitor[0] != null && thisMainMonitor[0] != undefined && thisMainMonitor[0] != "undefined") {
+
+            //delete the timer from the returned monitors timerscreen array
+            var timerToDeleteIndex = thisMainMonitor[0].timerScreens.indexOf(timerScreenId);        
+            if (timerToDeleteIndex != -1) { 
+                thisMainMonitor[0].timerScreens.splice(timerToDeleteIndex,1); 
+                        
+                // write a file to server for crash recovery
+                fs.writeFile('./activeMonitorScreens/'+thisMainMonitor[0].mainMonitorScreenId+'.txt', JSON.stringify(thisMainMonitor[0].timerScreens), function (err) {
+                    if (err) 
+                        return console.log(err);
+                });
+            }
+        }
+        
+
+        
+
+
+    });
+    socket.on('timerScreenAddedToMonitor', function(msg){ // mainMonitorScreenId, timerScreenId
+        // .log('timerScreenAddedToMonitor',msg);
+        // convert the strings received to an integer value
+        var mainMonitorScreenId = parseInt(msg.mainMonitorScreenId);
+        var timerScreenId = parseInt(msg.timerScreenId);
+        var controllerScreenId = parseInt(msg.controllerScreenId);
+
+        // find the session this timer belongs too so we can add the mainMonitorScreen to it
+        var thisSession = sessionsActive.filter(session => session.timerScreens.includes(timerScreenId));
+        
+        // Add the mainMonitorScreenId to the session
+        if (thisSession[0] != null && thisSession[0] != undefined && thisSession[0] != "undefined") {
+            if (!thisSession[0].monitorScreens.includes(mainMonitorScreenId)) {
+                //thisSession[0].monitorScreens.push(mainMonitorScreenId);
+            }
+        }
+
+        // add the timerScreenId to this monitor scrren timers array
+        var thisMainMonitorScreen = mainMonitorScreensActive.filter(monitorScreen => monitorScreen.mainMonitorScreenId == mainMonitorScreenId);    
+        if (thisMainMonitorScreen[0] != null && thisMainMonitorScreen[0] != undefined && thisMainMonitorScreen[0] != "undefined") {
+            if (!thisMainMonitorScreen[0].timerScreens.includes(timerScreenId)) {
+                thisMainMonitorScreen[0].timerScreens.push(timerScreenId);
+
+                // write a file to server for crash recovery
+                fs.writeFile('./activeMonitorScreens/'+thisMainMonitorScreen[0].mainMonitorScreenId+'.txt', JSON.stringify(thisMainMonitorScreen[0].timerScreens), function (err) {
+                    if (err) 
+                        return console.log(err);
+                });
+            }
+        }
+
+
+        
+    });
+
+    socket.on('sendTimerScreenToMonitor', function(msg){ // controllerScreenId, timerScreenId, monitorScreenId
+        if (logging) { console.log('sendTimerScreenToMonitor',msg); }
+
+        // convert the strings received to an integer value
+        var monitorScreenId = parseInt(msg.monitorScreenId);
+        var timerScreenId = parseInt(msg.timerScreenId);
+        var controllerScreenId = parseInt(msg.controllerScreenId);
+
+        // find the session this controller belongs too so we can add the mainMonitorScreen to it
+        var thisSession = sessionsActive.filter(session => session.controllerScreens.includes(controllerScreenId));
+
+        // Add the mainMonitorScreenId to the controllers session
+        if (!thisSession[0].monitorScreens.includes(monitorScreenId)) {
+            //thisSession[0].monitorScreens.push(monitorScreenId);
+        }
+        
+        // Send the timerScreenId to the mainMonitorScreen
+        var thisMainMonitorScreen = mainMonitorScreensActive.filter(monitorScreen => monitorScreen.mainMonitorScreenId == monitorScreenId); 
+        console.log("thisMainMonitorScreen",thisMainMonitorScreen);   
+        if (thisMainMonitorScreen[0] != null && thisMainMonitorScreen[0] != undefined && thisMainMonitorScreen[0] != "undefined") {
+            if (!thisMainMonitorScreen[0].timerScreens.includes(timerScreenId)) {
+                thisMainMonitorScreen[0].timerScreens.push(timerScreenId);
+                io.to(thisMainMonitorScreen[0].socketId).emit("timerScreenId",{'timerScreenId': timerScreenId});
+                        
+                // write a file to server for crash recovery
+                fs.writeFile('./activeMonitorScreens/'+thisMainMonitorScreen[0].mainMonitorScreenId+'.txt', JSON.stringify(thisMainMonitorScreen[0].timerScreens), function (err) {
+                    if (err) 
+                        return console.log(err);
+                });
+            }
+        }
+
+
+    });
+
     socket.on('transferControlQRCodeRequest', function(msg){ //{"controllerScreenId": controllerScreenId
         if (logging) { console.log('transferControlQRCodeRequest',msg); }
 
         // convert the string received to an integer value
-        var controllerScreenId = parseInt(msg['controllerScreenId']);
+        var controllerScreenId = parseInt(msg.controllerScreenId);
 
         // find the session this controller belongs too
         var session = sessionsActive.filter(session => session.controllerScreens.includes(controllerScreenId));
@@ -628,10 +762,10 @@ io.on('connection', function(socket){
                 }
                 controllerScreenIdsTimerScreenIds.push(newControllerTimerIds);
                 
-                oldBgImagesArrayEntry = bgImages.find(bgImagesArrayEntry => bgImagesArrayEntry.controllerScreenId == oldControllerScreenId);
-                bgImages.splice(bgImages.indexOf(bgImages.find(bgImagesArrayEntry => bgImagesArrayEntry.controllerScreenId == oldControllerScreenId)),1);
+                oldBgImagesArrayEntry = bgImages.find(bgImagesArrayEntry => bgImagesArrayEntry.sessionId == session.SessionId);
+                bgImages.splice(bgImages.indexOf(bgImages.find(bgImagesArrayEntry => bgImagesArrayEntry.sessionId == session.SessionId)),1);
                 if (oldBgImagesArrayEntry) {
-                    bgImages.push({"controllerScreenId": parseInt(msg.controllerScreenId),"data": oldBgImagesArrayEntry.data});
+                    bgImages.push({"sessionId": parseInt(session.SessionId),"data": oldBgImagesArrayEntry.data});
                 }
 
                 // send a message to the old controllerScreen to refresh. This should make it sit in the "input code" mode
@@ -732,12 +866,20 @@ io.on('connection', function(socket){
         etc...
         */
 
-        // add this image to the server bg images in use array
-        bgImages.push({"controllerScreenId": parseInt(msg.controllerScreenId),"data": msg.data});
+        
+
+
+
+
 
         // find the session this controller belongs to
         var session = sessionsActive.filter(session => session.controllerScreens.includes(parseInt(msg.controllerScreenId)));
         
+
+        // add this image to the server bg images in use array
+        bgImages.push({"sessionId": parseInt(session[0].sessionId),"data": msg.data});
+
+
         // send the image to each timer screen
         session[0].timerScreens.forEach(function (timerScreenId) {
             // Find the socket id for each timerScreenId
@@ -759,12 +901,18 @@ io.on('connection', function(socket){
                 io.to(thisMonitorScreenSockedId.socketId).emit("bgImage",{"data": msg.data});
             }
         });
+        if (session[0].sessionId != 1 && session[0].sessionId != 2 && session[0].sessionId != 3){ // don't write over the demo files
+            fs.writeFile('./sessionBgImages/'+session[0].sessionId+'.txt', msg.data, function (err) {
+                if (err) 
+                    return console.log(err);
+            });
+        }
 
     });
     socket.on("bgImageDelete",function(msg){ // controllerScreenId
         
         if (logging) { console.log("bgImageDelete",msg);}
-        bgImages.splice(bgImages.indexOf(bgImages.find(bgImage => bgImage.controllerScreenId === parseInt(msg.controllerScreenId))),1);
+        bgImages.splice(bgImages.indexOf(bgImages.find(bgImage => bgImage.sessionId === parseInt(session[0].sessionId))),1);
     });
     socket.on("getBgImage",function(msg){ // screenType: controllerScreen/timerScreen, screenId
         if (logging) { console.log("getBgImage",msg);}
@@ -778,9 +926,15 @@ io.on('connection', function(socket){
         etc...
         */
 
+
+
         switch(msg.screenType) {
             case "controllerScreen":
-                var imgDataArrayEntry = bgImages.find(bgImage => bgImage.controllerScreenId == parseInt(msg.screenId));
+                
+                // find the session this controller belongs to
+                var session = sessionsActive.filter(session => session.controllerScreens.includes(parseInt(msg.screenId)));
+
+                var imgDataArrayEntry = bgImages.find(bgImage => bgImage.sessionId == parseInt(session[0].sessionId));
                 if(typeof imgDataArrayEntry  != null && imgDataArrayEntry != undefined && imgDataArrayEntry != "undefined") {
                     if (socket != null && socket != undefined && socket != "undefined") {
                         if (imgDataArrayEntry != null && socket != undefined && socket != "undefined"){
@@ -796,12 +950,18 @@ io.on('connection', function(socket){
                 controllerScreenIdsTimerScreenIds
                 [ { controllerScreenId: 94071, timerScreenId: 40869 } ]
                 */
+               
+                // find the session this controller belongs to
+                var session = sessionsActive.filter(session => session.timerScreens.includes(parseInt(msg.screenId)));
+
                 var controllerScreenTimerScreen = controllerScreenIdsTimerScreenIds.find(controllerScreenTimerScreen => controllerScreenTimerScreen.timerScreenId == parseInt(msg.screenId));
-                var thisControllerScreenId = controllerScreenTimerScreen.controllerScreenId;
-                var imgDataArrayEntry = bgImages.find(bgImage => bgImage.controllerScreenId == parseInt(thisControllerScreenId));
-                if(typeof imgDataArrayEntry  != null && imgDataArrayEntry != undefined && imgDataArrayEntry != "undefined") {
-                    if (socket != null && socket != undefined && socket != "undefined") {
-                        io.to(socket.id).emit("bgImageReceived", {"data": imgDataArrayEntry.data});
+                if(typeof controllerScreenTimerScreen  != null && controllerScreenTimerScreen != undefined && controllerScreenTimerScreen != "undefined") {
+                    var thisControllerScreenId = controllerScreenTimerScreen.controllerScreenId;
+                    var imgDataArrayEntry = bgImages.find(bgImage => bgImage.sessionId == parseInt(session[0].sessionId));
+                    if(typeof imgDataArrayEntry  != null && imgDataArrayEntry != undefined && imgDataArrayEntry != "undefined") {
+                        if (socket != null && socket != undefined && socket != "undefined") {
+                            io.to(socket.id).emit("bgImageReceived", {"data": imgDataArrayEntry.data});
+                        }
                     }
                 }
                 break;
@@ -813,13 +973,18 @@ io.on('connection', function(socket){
   
     
     socket.on('printArrays', function(){   
-        console.log("_______________________________________________");     
+        
+        console.log("_______________________________________________"); 
+        console.log("_______________________________________________"); 
+        console.log("_______________________________________________"); 
+        console.log("_______________________________________________"); 
+        console.log("_______________________________________________"); 
+        console.log("_______________________________________________");  
+          
         console.log("---printArrays---");
         console.log("timerScreenIdsSocketIds",timerScreenIdsSocketIds);
         console.log();
         console.log("timerScreenIdsUsed",timerScreenIdsUsed);
-        console.log();
-        console.log();
         console.log();
         console.log("controllerScreenIdsSocketIds",controllerScreenIdsSocketIds);
         console.log();
@@ -827,13 +992,10 @@ io.on('connection', function(socket){
         console.log();
         console.log("controllerScreenIdsTimerScreenIds",controllerScreenIdsTimerScreenIds);
         console.log();
-        console.log();
-        console.log();
+        
         console.log("monitorScreenIdsSocketIds",monitorScreenIdsSocketIds);
         console.log();
         console.log("monitorScreenIdsUsed",monitorScreenIdsUsed);
-        console.log();
-        console.log();
         console.log();
         console.log("mainMonitorScreenIdsUsed",mainMonitorScreenIdsUsed);
         console.log();
@@ -841,19 +1003,21 @@ io.on('connection', function(socket){
         console.log();
         console.log("mainMonitorScreensToDelete",mainMonitorScreensToDelete);
         console.log();
-        console.log();
-        console.log();
+        /*
         console.log("bgImages",bgImages.length);
         console.log(); 
-        console.log('bingBongIntervalArray',bingBongIntervalArray);
-        console.log();
+        //console.log('bingBongIntervalArray',bingBongIntervalArray);
+        //console.log();
+        */
         console.log("sessionsActive");
         sessionsActive.forEach(function (session, sessionIndex) {
             console.log(session);
         }); 
         console.log(); 
+        
         console.log("sessionsToDelete",sessionsToDelete); 
-        console.log("_______________________________________________");  
+        console.log("_______________________________________________"); 
+        
     });
     
     socket.on('controllerSettingsUpdate', function(msg){ // controllerScreenId, timer --> a timer object (from a control screen), updateTimerScreens (true/false))
@@ -906,11 +1070,12 @@ io.on('connection', function(socket){
         sessionsActive.push(msg.timer);
 
 
-        
-        fs.writeFile('./sessionSaveFiles/'+msg.controllerScreenId+'.txt', JSON.stringify(msg.timer), function (err) {
-            if (err) 
-                return console.log(err);
-        });
+        if (msg.timer.sessionId != 1 && msg.timer.sessionId != 2 && msg.timer.sessionId != 3){ // don't write over the demo files
+            fs.writeFile('./sessionSaveFiles/'+msg.timer.sessionId+'.txt', JSON.stringify(msg.timer), function (err) {
+                if (err) 
+                    return console.log(err);
+            });
+        }
 
         
 
@@ -953,5 +1118,72 @@ io.on('connection', function(socket){
     
 });
 
-server.listen(3000, () => console.log(`Server running on port 3000`));
+server.listen(3000, () => {
 
+    // restart interrupted sessions
+    fs.readdirSync("./sessionSaveFiles/").forEach(function(name) {
+        fs.readFile("./sessionSaveFiles/"+name, 'utf8',(err, fileContent) => {
+            var tempTimerScreenId;
+            var tempControllerScreenId;
+            if( err ) {
+            } 
+            else {
+                data = JSON.parse(fileContent.toString());
+                sessionsActive.push(data);
+                data.timerScreens.forEach(function(timerScreenId){
+                    var timerScreenObject = {
+                        "timerScreenId": timerScreenId,
+                        "socketId": ''
+                    }
+                    tempTimerScreenId = timerScreenId;
+                    timerScreenIdsSocketIds.push(timerScreenObject);
+                });
+                data.controllerScreens.forEach(function(controllerScreenId){
+                    var controllerScreenObject = {
+                        "controllerScreenId": controllerScreenId,
+                        "socketId": ''
+                    }
+                    tempControllerScreenId = controllerScreenId;
+                    controllerScreenIdsSocketIds.push(controllerScreenObject);
+                });
+                controllerScreenIdsTimerScreenIds.push({ controllerScreenId: tempControllerScreenId, timerScreenId: tempTimerScreenId });
+
+
+                
+            }
+        });
+    });
+
+    fs.readdirSync("./activeMonitorScreens/").forEach(function(name) {
+        fs.readFile("./activeMonitorScreens/"+name, 'utf8',(err, fileContent) => {
+
+            // convert the file contenst to a JS object
+            data = JSON.parse(fileContent.toString());
+            
+            // create temp object
+
+            var tempObj = {
+                'mainMonitorScreenId': parseInt(name.substring(0,5)), // drop the ".txt" extension
+                'socketId': '',
+                'timerScreens': []
+            };
+
+            // loop through each timerId and add it to the array
+            data.forEach(function(timerScreenId){
+                tempObj.timerScreens.push(timerScreenId);
+            });
+
+            // push to mainMonitorScreensActive array
+            mainMonitorScreensActive.push(tempObj);
+
+        });
+    });
+
+    fs.readdirSync("./sessionBgImages/").forEach(function(name) {
+        fs.readFile("./sessionBgImages/"+name, 'utf8',(err, fileContent) => {
+            bgImages.push({"sessionId": name.split(".")[0],"data": fileContent});
+        });
+    });
+});
+
+//sessionsActive.push(msg.timer);

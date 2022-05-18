@@ -7,7 +7,6 @@
 	<meta name="apple-mobile-web-app-capable" content="yes" />
     
 	<title>Monitor</title>
- <link href="/timer/assets/css/style.css"               type="text/css" media="all" rel="stylesheet">
     
     <style>
 
@@ -28,10 +27,46 @@ body {
     padding: 0;
     font-family: 'Noto Sans JP', sans-serif;
 }
-#backButton                 { width: 30px; height: 30px; position: fixed; top: 30px; right: 30px; z-index: 3000; }
-.iFrameDeleteButton     {padding: 2px; background-color: red; font-weight: bold; position: absolute; top: 3px; right: 3px; font-size: 15;}
-.iFramwWrapper          { position: relative; float: left;}
-#wrapper                {  text-align: center; position: fixed;top: 50%; left: 50%;  transform: translate(-50%,-50%);  }
+#backButton             { width: 30px; height: 30px; position: fixed; top: 30px; right: 30px; z-index: 3000; }
+.iFrameDeleteButton     { padding: 2px; background-color: red; font-weight: bold; position: absolute; top: 3px; right: 3px; font-size: 15; color: #fff; width: 20px; text-align: center;}
+.iFramwWrapper          { position: relative; float: left; margin-left: 15px; margin-top: 15px; }
+
+#sceneChangeLogo        { width: 100px; height: 50px; position: fixed; bottom: 0px; right: 0px;  background-image: url(/timer/assets/images/sceneChangeLogo.png); z-index: 2500; }
+#monitorScreenId        { font-size: 10px; position: fixed; bottom: 0px; left 0px; color: #ffffff; z-index: 2600; }
+#loadingDots            { font-size: 50px; } 
+#wrapper                { position:fixed; width:100vw; max-width: 100%; height:100vh; max-height: 100%; top:0px; left:0px; font-size: 12px;}
+#offline-div                { opacity:1; background-color:#000000; color: #ffffff; text-align: center; position:fixed; width:100vw; max-width: 100%; height:100vh; max-height: 100%; top:0px; left:0px; z-index:2000; display: none;font-size: 10px;}
+#offline-div-content        { padding: 20px; background-color: rgba(0,0,0,1);  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); display: none;z-index:2001; color: #fff; text-align: center;}
+#offline-div-content img    { width: 60px; height: 60px; margin: auto; }
+.message { font-size: 18px; margin-left: 20px;}
+
+
+button {
+    font-size: 12px;
+    color: #fff;
+    height: 45px;
+    background: #ff6d00;
+    border-left: 1px solid #ffba85;
+    border-top: 1px solid #ffba85;
+    border-right: 1px solid #af4c00;
+    border-bottom: 1px solid #af4c00;
+    
+    padding: 12px 5px;
+    font-weight: 700;
+    transition: .3s ease;
+    -webkit-transition: .3s ease;
+    -moz-transition: .3s ease;
+    -ms-transition: .3s ease;
+    -o-transition: .3s ease;
+    display: inline;
+    float: left;
+}
+
+.inline                     { display: inline; }
+.inline-block               { display: inline-block; }
+.marginLeft5                { margin-left: 5px; }
+
+.medium                     { width: 80px; }
 
 
     </style>
@@ -48,12 +83,45 @@ body {
     var offlineIntervalRunning = false;
     var offlineIntervalCounter = 0;
     var timersOnPage = [];
+    var mainMonitorScreenId = "";
     var socket = io.connect({
         reconnection:           true,
         reconnectionDelay:      1000,
         reconnectionDelayMax:   5000,
         reconnectionAttempts:   Infinity
     });
+
+    function addTimerToPage(timerScreenId,showWarning, sendMessageToServer) {
+        if (!timersOnPage.includes(timerScreenId)) {
+                timersOnPage.push(timerScreenId);
+        }
+        if(!$('#'+timerScreenId).length){
+            console.log('timersOnPage',timersOnPage);
+            $("#monitorScreensWrapper").append(`
+            <div class='iFramwWrapper' id='`+timerScreenId+`'>
+                <div id='`+timerScreenId+`' class='iFrameDeleteButton'>X</div>
+                <iframe src="http://54.66.111.53:3000/timer/controlMonitor.html?timerCode=`+timerScreenId+`" ></iFrame>
+            </div>`);
+            if (sendMessageToServer){
+                socket.emit('timerScreenAddedToMonitor', {'mainMonitorScreenId': mainMonitorScreenId, "timerScreenId": timerScreenId });
+            }
+        }
+        else {
+            if (showWarning) {
+                alert("Timer is already included.");
+            }
+        }
+    }
+    
+    function removeTimerFromPage(timerScreenId, sendToServer) {
+        var index = timersOnPage.findIndex(p => p === timerScreenId);
+        timersOnPage.splice(index, 1);
+        console.log('timersOnPage',timersOnPage);
+        $('#'+timerScreenId).remove();
+        if (sendToServer) { 
+            socket.emit('timerScreenRemovedFromMainMonitor', {"timerScreenId": timerScreenId, "mainMoniterScreenId": mainMonitorScreenId});
+        } 
+    }
 
     $(function () {
 
@@ -73,8 +141,12 @@ body {
 
 
         socket.on('disconnect', function(reason){
+            $("#monitorScreensWrapper").empty();
+            console.log('disconnect',reason);
             $('#offline-div').show();
             $('#offline-div-content').show();
+            $("#monitorScreenId").text("ID: " + mainMonitorScreenId); 
+            $("#monitorScreenIdSpan").text(mainMonitorScreenId);
             if (reason === 'io server disconnect') {
                 socket.connect();
             }
@@ -88,63 +160,73 @@ body {
             } 
         });
 
-
-
-        socket.on('reconnected', function(msg){ // "data"
+        socket.on('reconnect', function(msg){ // "data"
+            mainMonitorScreenId = getUrlVars()["monitorCode"];
+            $("#monitorScreenId").text("ID: " + mainMonitorScreenId);
+            socket.emit('mainMonitorReconnectRequestTimerIds', { "mainMoniterScreenId": mainMonitorScreenId}); 
+            $("#monitorScreenIdSpan").text(getUrlVars()["monitorCode"]);
             $('#offline-div').hide();
             $('#offline-div-content').hide();
         });
         
         socket.on('newMainMonitorScreenId', function(msg){ // newMainMonitorScreenId
+            console.log('newMainMonitorScreenId',msg);
+            mainMonitorScreenId = parseInt(msg.newMainMonitorScreenId);
             $('#offline-div').hide();
             $('#offline-div-content').hide();
+            $("#monitorScreenId").text("ID: " + mainMonitorScreenId);
+            $("#monitorScreenIdSpan").text(mainMonitorScreenId);
             if (history.pushState) {
-                var newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?monitorCode='+msg.newMainMonitorScreenId;
+                var newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?monitorCode='+mainMonitorScreenId;
                 window.history.pushState({path:newurl},'',newurl);
             }
         });
+
+        socket.on('timerScreenId', function(msg){ // timerScreenId
+            addTimerToPage(msg.timerScreenId, false, false);
+            
+        });
+
+        socket.on('timerScreenIdSessionDeleted', function(msg){ // timerScreenId
+            console.log("timerScreenIdSessionDeleted",msg);
+            removeTimerFromPage(msg.timerScreenId,false);
+        });
+
         $('#wrapper').on("click", ".iFrameDeleteButton", function(){
             var id = $(this).attr('id');
-            $('#'+id).remove();
-            //socket.emit('monitorScreenRemoved', {"timerScreenId": id}); 
+            removeTimerFromPage(id,true);
+
         });
 
         $("#timerNameAdd").click(function() {    
-            if (!timersOnPage.includes($('#timerNameInput').val())) {
-                timersOnPage.push($('#timerNameInput').val());
-                $("#monitorScreensWrapper").append(`
-                <div class='iFramwWrapper' id='`+$('#timerNameInput').val()+`'>
-                    <div id='`+$('#timerNameInput').val()+`' class='iFrameDeleteButton'>X</div>
-                    <iframe src="http://54.66.111.53:3000/timer/controlMonitor.html?timerCode=`+$('#timerNameInput').val()+`" ></iFrame>
-                </div>`);
-                $('#timerNameInput').val('');
-            }
-            else {
-                alert("Timer is already included.");
-                $('#timerNameInput').val('');
-            }
+            addTimerToPage(parseInt($('#timerNameInput').val()),true,true);
+            
+            $('#timerNameInput').val('');
         });
+
         $("#sceneChangeLogo").click(function() {
             socket.emit('printArrays', "");
         });
+        
     });
         
   
     </script>
   </head>
 <body>
-    <div id='offline-div'> </div>
-    <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
-    <button class="backButton tiny btn" type="submit" id="backButton">&#60;</button>
-    <div id="wrapper" style="width: 100%; height: 100%;">
-        <div id='' style="float: left; width: 100%; text-align: left; padding: 10px; color: #ffffff; font-size: 10px; ">
-            <input  id="timerNameInput" class="inline"  style='height: 40px; margin-left: 20px;'><button class="medium  btn  inline marginLeft5" type="submit" id="timerNameAdd" >ADD</button>
-        </div> 
-    <div id="monitorScreensWrapper">
-    
+    <div id="mainWrapper">
+        <div id='offline-div'> </div>
+        <div id='offline-div-content'><img src='./assets/images/loading4.gif' /><br><br>LOADING<br><div id='loadingDots'>.</div></div>
+        <div id="wrapper" style="width: 100%; height: 100%;">
+            <div id='' style="float: left; width: 100%; text-align: left; padding: 10px; color: #ffffff; font-size: 10px; ">
+                <input  id="timerNameInput" class="inline"  placeholder="TIMER SCREEN ID" style='height: 40px; margin-left: 20px; padding-left: 10px;'>
+                <span class="message">OR ENTER <span id="monitorScreenIdSpan"></span> INTO CONTROLLER MONITOR MODAL</span>
+                <button class="medium  btn3  inline marginLeft5" type="submit" id="timerNameAdd" >ADD</button>
+            </div> 
+            <div id="monitorScreensWrapper"></div>
+        </div>
+        <div id="monitorScreenId"></div><div id="sceneChangeLogo" ></div>
     </div>
-    </div>
-    <div id="monitorScreenId"></div><div id="sceneChangeLogo" ></div>
 
 </body>
 </html>
